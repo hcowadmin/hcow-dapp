@@ -8,7 +8,7 @@
  * Nothing here polls. Wallet state arrives from subscribeWallet via useWallet.
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { adapter } from "./data";
 import { T } from "./config/tokens";
 import { EXTERNAL_LINKS, PROTOCOL } from "./config/constants";
@@ -16,9 +16,10 @@ import { HCOW_MARK } from "./config/brand";
 import { presentError } from "./lib/errors";
 import { fmtAmount, shortHash } from "./lib/format";
 import { useWallet } from "./hooks/useWallet";
-import { LowGasBanner, WrongNetworkBanner } from "./components/Banners";
+import { FaucetBanner, LowGasBanner, TestnetStrip, WrongNetworkBanner } from "./components/Banners";
 import { ToastHost } from "./components/Toast";
 import type { ToastInput, ToastItem } from "./components/Toast";
+import type { FaucetStatus } from "./data";
 import { WalletConnectModal } from "./components/WalletConnectModal";
 import { Button, MONO } from "./components/ui";
 import type { Route } from "./components/ui";
@@ -60,12 +61,49 @@ export default function App() {
   }, []);
 
   const openConnect = useCallback(() => setConnectOpen(true), []);
+
+  /* Test faucet. Present only on a build pointed at a test deployment with a
+     faucet address configured; `adapter.faucet` is undefined otherwise and
+     none of this renders. */
+  const [faucet, setFaucet] = useState<FaucetStatus | null>(null);
+  const [claiming, setClaiming] = useState(false);
   const navigate = useCallback((r: Route) => setRoute(r), []);
 
   /* Identity of the current account. Screens use it as a useAsync dependency so
      data refetches on account or chain change, and never on a timer. */
   const walletKey = `${wallet.address ?? "none"}:${wallet.chainId ?? "none"}`;
   const canRead = wallet.connected && !wrongNetwork;
+
+  useEffect(() => {
+    const f = adapter.faucet;
+    if (!f || !canRead) { setFaucet(null); return; }
+    let live = true;
+    // A faucet that cannot be read is a faucet that is not offered, rather
+    // than an error worth interrupting the user for.
+    f.getStatus().then((s) => { if (live) setFaucet(s); }, () => { if (live) setFaucet(null); });
+    return () => { live = false; };
+  }, [walletKey, canRead, claiming]);
+
+  async function claimTestTokens(): Promise<void> {
+    const f = adapter.faucet;
+    if (!f) return;
+    setClaiming(true);
+    try {
+      const res = await f.claim();
+      pushToast({
+        tone: "success",
+        title: "Test tokens received",
+        body: "They have no value. Use them to try bonding.",
+        txHash: res.hash,
+        offerTxLink: true,
+      });
+    } catch (e) {
+      const p = presentError(e);
+      pushToast({ tone: p.tone, title: p.title, body: p.body, txHash: p.txHash, offerTxLink: p.offerTxLink });
+    } finally {
+      setClaiming(false);
+    }
+  }
 
   async function disconnect(): Promise<void> {
     setDisconnecting(true);
@@ -92,6 +130,8 @@ export default function App() {
 
   return (
     <div style={{ minHeight: "100vh", background: T.bg, color: T.tPri, fontFamily: T.font }}>
+      <TestnetStrip />
+
       {/* ---------------- header ---------------- */}
       <header
         style={{
@@ -196,10 +236,20 @@ export default function App() {
       </header>
 
       {/* ---------------- global banners ---------------- */}
-      {wrongNetwork || lowGas ? (
+      {wrongNetwork || lowGas || faucet ? (
         <div style={{ maxWidth: MAX_WIDTH, margin: "0 auto", padding: "16px 24px 0", display: "grid", gap: 10 }}>
           {wrongNetwork ? <WrongNetworkBanner /> : null}
           {lowGas ? <LowGasBanner bnb={wallet.balances.bnb} /> : null}
+          {faucet ? (
+            <FaucetBanner
+              hcowPerClaim={faucet.hcowPerClaim}
+              usdtPerClaim={faucet.usdtPerClaim}
+              claimsLeft={faucet.claimsLeft}
+              readyAt={faucet.readyAt}
+              busy={claiming}
+              onClaim={claimTestTokens}
+            />
+          ) : null}
         </div>
       ) : null}
 

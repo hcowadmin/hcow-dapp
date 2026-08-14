@@ -92,6 +92,15 @@ export const STAKING_ABI = [
   "error SameRepresentative()",
 ] as const;
 
+/** Testnet faucet. Not deployed on mainnet. */
+export const FAUCET_ABI = [
+  "function claim()",
+  "function claimableAt(address) view returns (uint64)",
+  "function status(address) view returns (uint256 hcowPerClaim, uint256 usdtPerClaim, uint256 hcowRemaining, uint256 usdtRemaining, uint64 readyAt, uint256 claimsLeft)",
+  "error CooldownActive(uint64 readyAt)",
+  "error FaucetEmpty(address token, uint256 requested, uint256 available)",
+] as const;
+
 export const LEDGER_ABI = [
   "function nextEpoch() view returns (uint64)",
   "function totalRecords() view returns (uint256)",

@@ -421,6 +421,22 @@ export interface BurnStats {
 // THE ADAPTER
 // ============================================================
 
+/**
+ * Test faucet state. Testnet only. See IHcowAdapter.faucet.
+ */
+export interface FaucetStatus {
+  /** Amount handed out per claim. */
+  hcowPerClaim: Amount;
+  usdtPerClaim: Amount;
+  /** What the faucet still holds. */
+  hcowRemaining: Amount;
+  usdtRemaining: Amount;
+  /** null when the account may claim now. */
+  readyAt: Timestamp | null;
+  /** How many more claims the faucet can serve before it runs dry. */
+  claimsLeft: number;
+}
+
 export interface IHcowAdapter {
   // ---- WALLET ----
   getWalletState(): Promise<WalletState>;
@@ -463,6 +479,18 @@ export interface IHcowAdapter {
   cancelUnstake(): Promise<TxResult>;
   withdrawUnstaked(): Promise<TxResult>;
   claimHcow(): Promise<TxResult>;
+
+  // ---- TESTNET ONLY ----
+  /**
+   * Present only on a build pointed at a test deployment with a faucet
+   * configured. Absent on mainnet, and the UI must treat absence as "there is
+   * no faucet" rather than as an error. Nothing else in the app may depend on
+   * it existing.
+   */
+  faucet?: {
+    getStatus(): Promise<FaucetStatus>;
+    claim(): Promise<TxResult>;
+  };
 }
 
 // ============================================================

@@ -37,6 +37,12 @@ export const DEPLOYMENT = {
     profitShare: pick("VITE_PROFIT_SHARE_ADDRESS", "0xc49176f8D0F26c9D07ca7E6E12d0bc4aC16e613B"),
     staking: pick("VITE_STAKING_ADDRESS", "0xBa2d31854Cc85759094Cf12e4b3867F76c42096A"),
     ledger: pick("VITE_LEDGER_ADDRESS", "0x038b3E21fF62c9490787Cf3C27eBBB9a772B409e"),
+    /**
+     * Testnet faucet. Empty string means no faucet, which is the correct
+     * mainnet configuration: the adapter then omits the faucet entirely and
+     * the UI shows no claim button.
+     */
+    faucet: pick("VITE_FAUCET_ADDRESS", "0x701253AC9E6164d3a2DAb181d6348C306F109358"),
   },
 
   /**

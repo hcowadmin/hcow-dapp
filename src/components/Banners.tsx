@@ -8,6 +8,7 @@
 import type { ReactNode } from "react";
 import { T } from "../config/tokens";
 import { EXTERNAL_LINKS, PROTOCOL } from "../config/constants";
+import { DEPLOYMENT } from "../config/deployment";
 import { fmtCountdown, fmtDate, fmtHcow } from "../lib/format";
 import { useCountdown } from "../hooks/useCountdown";
 import { Badge, Button, ExtLink, MONO, toneColors } from "./ui";
@@ -63,6 +64,94 @@ function BannerShell({ tone, icon, title, children, actions, role = "status" }: 
       </div>
       {actions ? <div style={{ display: "flex", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>{actions}</div> : null}
     </div>
+  );
+}
+
+/* ============================================================
+   TESTNET STRIP
+   ============================================================ */
+
+/**
+ * Sits above the header, full width, on every screen, and is not dismissible.
+ *
+ * The reason it is here and not inside the page is screenshots. Someone will
+ * crop the Portfolio panel showing a nine figure HCOW balance and post it, and
+ * without a strip pinned to the very top of the viewport that image reads as a
+ * real holding. A caveat that only appears on the dashboard protects nobody.
+ */
+export function TestnetStrip() {
+  if (!DEPLOYMENT.isTestDeployment) return null;
+  return (
+    <div
+      role="status"
+      style={{
+        background: T.warnBg,
+        borderBottom: `1px solid ${T.warnBd}`,
+        color: T.warnFg,
+        fontSize: 12,
+        lineHeight: 1.5,
+        padding: "8px 24px",
+        textAlign: "center",
+        ...MONO,
+      }}
+    >
+      TESTNET · {DEPLOYMENT.chainName} · every token and amount shown here is a
+      test value with no monetary worth
+    </div>
+  );
+}
+
+/* ============================================================
+   TEST FAUCET
+   ============================================================ */
+
+interface FaucetBannerProps {
+  hcowPerClaim: number;
+  usdtPerClaim: number;
+  claimsLeft: number;
+  readyAt: number | null;
+  busy: boolean;
+  onClaim: () => void;
+}
+
+export function FaucetBanner({
+  hcowPerClaim,
+  usdtPerClaim,
+  claimsLeft,
+  readyAt,
+  busy,
+  onClaim,
+}: FaucetBannerProps) {
+  const empty = claimsLeft === 0;
+  const waiting = readyAt !== null;
+
+  return (
+    <BannerShell
+      tone="info"
+      icon="+"
+      title="Test tokens"
+      actions={
+        <Button onClick={onClaim} disabled={busy || empty || waiting}>
+          {busy ? "Claiming..." : "Get test tokens"}
+        </Button>
+      }
+    >
+      {empty ? (
+        <>The faucet is out of test tokens. Ask the team to refill it.</>
+      ) : waiting ? (
+        <>
+          Already claimed. Next claim after{" "}
+          <span style={MONO}>{fmtDate(readyAt as number)}</span>.
+        </>
+      ) : (
+        <>
+          Take <span style={MONO}>{fmtHcow(hcowPerClaim)} HCOW</span> and{" "}
+          <span style={MONO}>{usdtPerClaim.toLocaleString()} USDT</span> to try bonding.
+          One claim per address per day, <span style={MONO}>{claimsLeft}</span> left in the
+          faucet. These are test tokens and cannot be sold or transferred for value.
+        </>
+      )}
+    </BannerShell>
   );
 }
 

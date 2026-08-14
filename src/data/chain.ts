@@ -49,6 +49,7 @@ import {
   type BurnStats,
   type Epoch,
   type EpochDistribution,
+  type FaucetStatus,
   type Hex,
   type IHcowAdapter,
   type NetworkStats,
@@ -65,7 +66,7 @@ import {
   type WalletState,
 } from "./adapter";
 
-import { ERC20_ABI, LEDGER_ABI, PROFIT_SHARE_ABI, STAKING_ABI } from "./abi";
+import { ERC20_ABI, FAUCET_ABI, LEDGER_ABI, PROFIT_SHARE_ABI, STAKING_ABI } from "./abi";
 import {
   eventsForAccount,
   indexerConfigured,
@@ -160,6 +161,11 @@ const reader = {
   staking: new Contract(DEPLOYMENT.addresses.staking, STAKING_ABI, readProvider),
   ledger: new Contract(DEPLOYMENT.addresses.ledger, LEDGER_ABI, readProvider),
 };
+
+/** Null on any deployment without a faucet configured, which includes mainnet. */
+const faucetReader = DEPLOYMENT.addresses.faucet
+  ? new Contract(DEPLOYMENT.addresses.faucet, FAUCET_ABI, readProvider)
+  : null;
 
 // ============================================================
 // WALLET SESSION
@@ -274,6 +280,7 @@ const REVERT_MAP: Record<string, { code: AdapterErrorCode; msg: string }> = {
   UnstakeAlreadyPending: { code: "TX_REVERTED", msg: "An unstake is already pending." },
   SameRepresentative: { code: "INVALID_REPRESENTATIVE", msg: "Already delegated to that representative." },
   ZeroAmount: { code: "TX_REVERTED", msg: "Amount must be greater than zero." },
+  FaucetEmpty: { code: "TX_REVERTED", msg: "The test faucet is empty. Ask the team to refill it." },
 };
 
 function mapError(e: unknown, txHash?: Hex): AdapterError {
@@ -933,6 +940,42 @@ export const chainAdapter: IHcowAdapter = {
     const c = new Contract(DEPLOYMENT.addresses.staking, STAKING_ABI, signer);
     return submit(() => c.claimHcow() as Promise<TransactionResponse>);
   },
+
+  // ---------------------------------------------------------- testnet faucet
+
+  /**
+   * Attached only when an address is configured, so `adapter.faucet` is
+   * undefined on a mainnet build and the UI renders nothing rather than a
+   * button that cannot work.
+   */
+  faucet: faucetReader
+    ? {
+        async getStatus(): Promise<FaucetStatus> {
+          // Reads for the zero address when disconnected, which still returns
+          // the amounts and the remaining supply. The banner can then say what
+          // the faucet offers before a wallet is attached.
+          const who = session.address ?? "0x0000000000000000000000000000000000000000";
+          const s = (await faucetReader.status(who)) as [
+            bigint, bigint, bigint, bigint, bigint, bigint,
+          ];
+          const readyAt = Number(s[4]);
+          return {
+            hcowPerClaim: toAmount(s[0]),
+            usdtPerClaim: toAmount(s[1]),
+            hcowRemaining: toAmount(s[2]),
+            usdtRemaining: toAmount(s[3]),
+            readyAt: readyAt > 0 ? secToMs(readyAt) : null,
+            claimsLeft: Number(s[5]),
+          };
+        },
+
+        async claim(): Promise<TxResult> {
+          const signer = await requireSigner();
+          const c = new Contract(DEPLOYMENT.addresses.faucet, FAUCET_ABI, signer);
+          return submit(() => c.claim() as Promise<TransactionResponse>);
+        },
+      }
+    : undefined,
 };
 
 // ============================================================
