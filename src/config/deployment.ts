@@ -12,9 +12,14 @@
  *   VITE_PROFIT_SHARE_ADDRESS, VITE_STAKING_ADDRESS, VITE_LEDGER_ADDRESS,
  *   VITE_INDEXER_URL, VITE_INDEXER_KEY
  *
- * The defaults below are the BSC TESTNET deployment of 2026-08-13. The HCOW
- * and USDT entries there are stand-in test tokens with no value. The real HCOW
- * token contract does not exist yet.
+ * The defaults below are the BSC TESTNET deployment of 2026-09-02, which
+ * replaced the 2026-08-13 one. The HCOW and USDT entries are stand-in test
+ * tokens with no value; the real HCOW token contract does not exist yet.
+ *
+ * The 2026-08-13 addresses are superseded and must not be used. That
+ * deployment was made from a pre-audit revision with a single wallet holding
+ * every role, which is the shape the mainnet deploy script refuses. This one
+ * was deployed from the audited commit with all six roles separated.
  */
 
 const env = (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
@@ -32,17 +37,17 @@ export const DEPLOYMENT = {
   nativeSymbol: pick("VITE_NATIVE_SYMBOL", "tBNB"),
 
   addresses: {
-    hcow: pick("VITE_HCOW_ADDRESS", "0x3c726E2C04ad4FbD81F52506218f2D296506007d"),
-    usdt: pick("VITE_USDT_ADDRESS", "0x453738c62aD35Bb81F4204C3545F4b9832F5D2Dd"),
-    profitShare: pick("VITE_PROFIT_SHARE_ADDRESS", "0xc49176f8D0F26c9D07ca7E6E12d0bc4aC16e613B"),
-    staking: pick("VITE_STAKING_ADDRESS", "0xBa2d31854Cc85759094Cf12e4b3867F76c42096A"),
-    ledger: pick("VITE_LEDGER_ADDRESS", "0x038b3E21fF62c9490787Cf3C27eBBB9a772B409e"),
+    hcow: pick("VITE_HCOW_ADDRESS", "0xD4518f417bDcA9fB325A29bFf6D3ad78a7886852"),
+    usdt: pick("VITE_USDT_ADDRESS", "0x65d36196a9C0893c44dbCbf54e5f6Dc4Ae5eeDD5"),
+    profitShare: pick("VITE_PROFIT_SHARE_ADDRESS", "0x795177074654B0Bb4b2B5A4405B6069e79D01f73"),
+    staking: pick("VITE_STAKING_ADDRESS", "0x01C2d87eD3047eB02BD968c1eb8e6B5055bb6345"),
+    ledger: pick("VITE_LEDGER_ADDRESS", "0xF62d0322dDf5f2913ed1751d0104d9f0D3B3EC19"),
     /**
      * Testnet faucet. Empty string means no faucet, which is the correct
      * mainnet configuration: the adapter then omits the faucet entirely and
      * the UI shows no claim button.
      */
-    faucet: pick("VITE_FAUCET_ADDRESS", "0x701253AC9E6164d3a2DAb181d6348C306F109358"),
+    faucet: pick("VITE_FAUCET_ADDRESS", "0xbfEfa53d4800A6Ed2026cb7b34d182A71cb0684b"),
   },
 
   /**
@@ -54,7 +59,7 @@ export const DEPLOYMENT = {
    * After the first settlement this value is no longer used. The countdown
    * runs from the last settlement's on-chain settledAt.
    */
-  genesisMs: Number(pick("VITE_GENESIS_MS", "1786634000000")),
+  genesisMs: Number(pick("VITE_GENESIS_MS", "1788353400000")),
 
   /**
    * Event index. Supabase project URL and its anon key, which is a public
