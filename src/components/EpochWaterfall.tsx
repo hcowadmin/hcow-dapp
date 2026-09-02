@@ -295,7 +295,7 @@ export function EpochWaterfall({ distribution: d }: EpochWaterfallProps) {
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: T.warnFg }}>Operating costs above the cap</div>
             <div style={{ fontSize: 12, color: T.tPri, marginTop: 3, lineHeight: 1.5 }}>
-              Absorbed by the game studio and foundation shares. Not deducted from the participant share.
+              Absorbed by the game studio and project team shares. Not deducted from the participant share.
             </div>
           </div>
           <div style={{ ...MONO, fontSize: 14, color: T.warnFg, whiteSpace: "nowrap" }}>
@@ -330,11 +330,11 @@ export function EpochWaterfall({ distribution: d }: EpochWaterfallProps) {
           note="Live operations and new titles."
         />
         <Split
-          label="Foundation"
-          pct={PROTOCOL.DISTRIBUTION.FOUNDATION_PCT}
-          value={d.foundationUsdt}
+          label="Project team"
+          pct={PROTOCOL.DISTRIBUTION.TEAM_PCT}
+          value={d.teamUsdt}
           tone="muted"
-          note="Ecosystem, infrastructure and growth."
+          note="Paid to the project team. The contract calls this leg team."
         />
       </div>
 

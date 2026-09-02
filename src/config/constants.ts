@@ -24,7 +24,7 @@ export const PROTOCOL = {
   UNBOND_COOLDOWN_DAYS: 7,
   UNBOND_COOLDOWN_MS: 7 * 24 * 60 * 60 * 1000,
 
-  // ---- Network Staking (DPoS) ----
+  // ---- Network Staking (delegation and commission, not consensus) ----
   UNSTAKE_COOLDOWN_DAYS: 7,
   UNSTAKE_COOLDOWN_MS: 7 * 24 * 60 * 60 * 1000,
   /** Contract-level ceiling on representative commission. */
@@ -34,7 +34,7 @@ export const PROTOCOL = {
   DISTRIBUTION: {
     PARTICIPANTS_PCT: 50,
     GAME_STUDIO_PCT: 25,
-    FOUNDATION_PCT: 25,
+    TEAM_PCT: 25,
   },
 
   /** Deductible operating cost ceiling, as a share of net revenue. */

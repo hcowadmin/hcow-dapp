@@ -138,7 +138,7 @@ function buildDistribution(epoch: number, settledAt: number): EpochDistribution 
     distributableProfitUsdt,
     participantsUsdt: (distributableProfitUsdt * d.PARTICIPANTS_PCT) / 100,
     gameStudioUsdt: (distributableProfitUsdt * d.GAME_STUDIO_PCT) / 100,
-    foundationUsdt: (distributableProfitUsdt * d.FOUNDATION_PCT) / 100,
+    teamUsdt: (distributableProfitUsdt * d.TEAM_PCT) / 100,
     totalHcowDeducted,
     snapshotBondedHcow,
     chainVerifiableRatio: grossReceivedUsdt > 0

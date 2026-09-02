@@ -170,7 +170,7 @@ export function HomeScreen({ wallet, walletKey, canRead, pushToast, onNavigate, 
                     <Skeleton width={80} />
                   )
                 }
-                sub={network ? `${network.activeRepresentatives}/${network.totalRepresentatives} representatives producing` : undefined}
+                sub={network ? `${network.activeRepresentatives}/${network.totalRepresentatives} representatives active` : undefined}
               />
             </div>
           )}
@@ -288,7 +288,7 @@ export function HomeScreen({ wallet, walletKey, canRead, pushToast, onNavigate, 
             </Card>
 
             <Card
-              kicker="Network staking · DPoS"
+              kicker="Network staking"
               title="Staked HCOW"
               right={<Badge tone={pos.data.staked.status === "active" ? "ok" : "info"}>{pos.data.staked.status.replace("_", " ")}</Badge>}
             >

@@ -217,7 +217,7 @@ export function PortfolioScreen({
               </div>
             </Card>
 
-            <Card kicker="Network staking · DPoS" title="Staked">
+            <Card kicker="Network staking" title="Staked">
               <KV label="Staked" value={fmtHcow(pos.staked.stakedAmount)} emphasis />
               <KV label="Representative" value={pos.staked.delegatedTo ?? "Not delegated"} />
               <KV

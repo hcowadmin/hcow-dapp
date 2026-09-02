@@ -1,5 +1,5 @@
 /**
- * HCOW dApp — Network Staking lane (DPoS).
+ * HCOW dApp — Network Staking lane.
  *
  * Staked HCOW is locked, and is not subject to deduction. That is a statement
  * about mechanics, not a promise about outcomes, so nothing on this screen
@@ -62,7 +62,7 @@ const REP_TONE: Record<Representative["status"], Tone> = {
 };
 
 const REP_LABEL: Record<Representative["status"], string> = {
-  active: "Producing",
+  active: "Active",
   warning: "Degraded",
   inactive: "Inactive",
 };
@@ -169,15 +169,16 @@ export function NetworkStakingScreen({
       >
         <div>
           <div style={{ ...MONO, fontSize: 11, letterSpacing: "0.14em", textTransform: "uppercase", color: T.tSec }}>
-            Delegated proof of stake
+            Delegation and commission
           </div>
           <h1 style={{ margin: "10px 0 12px", fontSize: 34, fontWeight: 700, letterSpacing: "-0.02em" }}>
             Network Staking
           </h1>
           <p style={{ margin: 0, maxWidth: 560, fontSize: 15, lineHeight: 1.6, color: T.tSec }}>
-            Delegate HCOW to a representative to help secure the network and receive HCOW rewards. Staked HCOW is
-            locked, and is not subject to deduction. It is released to your wallet after a{" "}
-            {PROTOCOL.UNSTAKE_COOLDOWN_DAYS}-day cooldown and a manual withdrawal.
+            Delegate HCOW to a representative and receive HCOW rewards. HCOW is a BEP-20 token on BNB Chain, so
+            nothing here secures a network and representatives do not run infrastructure: this contract distributes
+            rewards and pays representative commission. Staked HCOW is locked, is not subject to deduction, and is
+            released to your wallet after a {PROTOCOL.UNSTAKE_COOLDOWN_DAYS}-day cooldown and a manual withdrawal.
           </p>
           <div style={{ marginTop: 20 }}>
             <Button variant="ghost" onClick={() => onNavigate("profit")}>
@@ -186,27 +187,27 @@ export function NetworkStakingScreen({
           </div>
         </div>
 
-        <Card kicker="Network" title="Status" elevated>
+        <Card kicker="Representative registry" title="Status" elevated>
           {network ? (
             <div style={{ display: "grid", gap: 10 }}>
               <Badge tone={network.networkStatus === "healthy" ? "ok" : network.networkStatus === "degraded" ? "warn" : "danger"}>
                 {network.networkStatus}
               </Badge>
               <KV
-                label="Representatives producing"
+                label="Representatives active"
                 value={`${network.activeRepresentatives} / ${network.totalRepresentatives}`}
               />
-              <KV label="Last block" value={fmtDate(network.lastBlockAt)} />
+              <KV label="BNB Chain head" value={fmtDate(network.lastBlockAt)} />
             </div>
           ) : (
-            <LoadingBlock label="Loading network status" rows={3} />
+            <LoadingBlock label="Loading registry status" rows={3} />
           )}
         </Card>
       </section>
 
       {/* ---------------- network overview ---------------- */}
       <section>
-        <SectionLabel right={`Commission capped at ${PROTOCOL.COMMISSION_CAP_PCT}%`}>Network overview</SectionLabel>
+        <SectionLabel right={`Commission capped at ${PROTOCOL.COMMISSION_CAP_PCT}%`}>Delegation overview</SectionLabel>
         <AutoGrid min={230}>
           <Metric
             label="Total delegated"
@@ -373,7 +374,7 @@ export function NetworkStakingScreen({
         {pub.loading ? (
           <LoadingBlock label="Loading representatives" rows={5} />
         ) : reps.length === 0 ? (
-          <EmptyState title="No representatives listed" body="The registry returned no representatives. Delegation is unavailable until at least one is producing." />
+          <EmptyState title="No representatives listed" body="The registry returned no representatives. Delegation is unavailable until at least one is active." />
         ) : (
           <AutoGrid min={300}>
             {reps.map((r) => {
@@ -403,11 +404,6 @@ export function NetworkStakingScreen({
                       sub={`Contract cap ${PROTOCOL.COMMISSION_CAP_PCT}%`}
                     />
                     <KV label="Estimated APR" value={<Apr pct={r.estimatedAprPct} size="sm" />} />
-                    <KV
-                      label="Uptime · 30d"
-                      value={r.uptimeLast30dPct === null ? "—" : fmtPct(r.uptimeLast30dPct, 2)}
-                      sub={r.uptimeLast30dPct === null ? "Monitoring pending" : undefined}
-                    />
                   </div>
 
                   <div style={{ marginTop: 16 }}>

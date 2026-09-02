@@ -610,9 +610,7 @@ export const chainAdapter: IHcowAdapter = {
       distributableProfitUsdt: profit,
       participantsUsdt: participants,
       gameStudioUsdt: studio,
-      // NOTE: the interface calls this leg "foundation". The confirmed policy
-      // is that it pays the project team. Renaming the field is a UI copy task.
-      foundationUsdt: team,
+      teamUsdt: team,
 
       totalHcowDeducted: toAmount(s.hcowDeducted),
       snapshotBondedHcow: toAmount(s.snapshotBondedHcow),

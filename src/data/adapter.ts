@@ -49,13 +49,13 @@
  *    - operatingCostsUsdt      the CLOSED list in CostCategory, capped at
  *                              OPEX_CAP_PCT of netRevenueUsdt
  *    = distributableProfitUsdt
- *      split 50 participants / 25 game studio / 25 foundation
+ *      split 50 participants / 25 game studio / 25 project team
  *
  *  FOUR RULES THAT MAKE A NET-PROFIT SPLIT DEFENSIBLE. All load-bearing.
  *
  *   1. OPERATING COSTS ARE CAPPED. Deductible opex may not exceed
  *      OPEX_CAP_PCT of netRevenueUsdt. Anything above the cap is absorbed by
- *      the studio and foundation shares, never by the participant share.
+ *      the studio and team shares, never by the participant share.
  *      This converts an unbounded discretionary deduction into a bounded one.
  *
  *   2. THE COST LIST IS CLOSED. Only CostCategory values may be deducted.
@@ -237,14 +237,15 @@ export interface EpochDistribution {
 
   /** After the cap has been applied. */
   operatingCostsUsdt: Amount;
-  /** Opex incurred above the cap. Absorbed by studio and foundation. */
+  /** Opex incurred above the cap. Absorbed by studio and project team. */
   operatingCostsAboveCapUsdt: Amount;
 
   distributableProfitUsdt: Amount;
 
   participantsUsdt: Amount;   // 50
   gameStudioUsdt: Amount;     // 25
-  foundationUsdt: Amount;     // 25
+  /** The contract calls this leg `team`. It pays the project team, not a foundation. */
+  teamUsdt: Amount;           // 25
 
   /**
    * Total HCOW deducted from bonded principal this epoch.
