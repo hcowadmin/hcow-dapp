@@ -125,7 +125,7 @@ export function HomeScreen({ wallet, walletKey, canRead, pushToast, onNavigate, 
                 color: "transparent",
               }}
             >
-              game revenue
+              distributable profit
             </span>
             .
           </h1>
