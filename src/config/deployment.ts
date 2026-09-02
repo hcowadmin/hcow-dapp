@@ -59,7 +59,7 @@ export const DEPLOYMENT = {
    * After the first settlement this value is no longer used. The countdown
    * runs from the last settlement's on-chain settledAt.
    */
-  genesisMs: Number(pick("VITE_GENESIS_MS", "1788353400000")),
+  genesisMs: Number(pick("VITE_GENESIS_MS", "1788353450000")),
 
   /**
    * Event index. Supabase project URL and its anon key, which is a public
