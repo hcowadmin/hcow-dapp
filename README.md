@@ -154,24 +154,33 @@ well as in `chain.ts`.
 
 1. **Never resolve a write before 1 block confirmation.** The UI updates state
    the moment a `TxResult` resolves. There are no optimistic updates.
-2. **Every failure throws `AdapterError` with one of the 12 codes.** A raw
-   provider error reaching the UI collapses into a generic toast. Attach the
-   original as `cause`.
+2. **Every failure throws `AdapterError` with one of the 12 codes, reads
+   included.** A raw provider error reaching the UI collapses into a generic
+   toast. Attach the original as `cause`. A read that cannot reach or decode the
+   chain is `RPC_ERROR`. A sentence written for the user travels as `detail`,
+   and an approval that was confirmed before a later step failed travels as
+   `approvalHash` (adapter v0.4.5): the UI must not say "Nothing was sent" then.
 3. **`TX_TIMEOUT` after 60s**, with `txHash` attached, and keep watching in the
-   background.
+   background: when the receipt lands later, the adapter refreshes balances and
+   publishes the wallet state.
 4. **Amounts crossing the interface are human-readable numbers, not wei.**
    Convert at the adapter boundary and nowhere else.
 5. **`getWalletState` never throws.** Disconnected returns
    `{connected:false, address:null, chainId:null, balances:{0,0,0}}`.
-   Never a stale address.
+   Never a stale address: a wallet that cannot be read is reported as
+   disconnected.
 6. **`subscribeWallet` fires once immediately, then on every account, chain and
    balance change.** The UI does not poll. Without this the app will show one
-   account's balance while signing as another.
+   account's balance while signing as another. The adapter follows new blocks
+   for balances, at most once every 15 seconds.
 7. **`getEpoch` is cached per epoch.** It is read on mount; the countdown ticks
    locally and costs no RPC. It counts down only to the earliest settlement the
    contract accepts (`lastSettledAt + MIN_EPOCH_INTERVAL`). The contract does
    not schedule epochs, so the app never shows an end time or "Settling…".
 8. **Cooldown `readyAt` comes from chain state**, never `Date.now() + 7 days`.
+   When the browser's clock runs ahead of the chain it is shifted by that much,
+   so a local countdown cannot finish before the contract's. Withdrawals are
+   checked against the latest block's time, not the browser's.
 
 ---
 

@@ -242,10 +242,11 @@ export default function App() {
           {lowGas ? <LowGasBanner bnb={wallet.balances.bnb} /> : null}
           {faucet ? (
             <FaucetBanner
-              hcowPerClaim={faucet.hcowPerClaim}
-              usdtPerClaim={faucet.usdtPerClaim}
-              claimsLeft={faucet.claimsLeft}
+              hcowNow={faucet.hcowNow}
+              usdtNow={faucet.usdtNow}
               readyAt={faucet.readyAt}
+              windowClaimsLeft={faucet.windowClaimsLeft}
+              windowResetsAt={faucet.windowResetsAt}
               busy={claiming}
               onClaim={claimTestTokens}
             />

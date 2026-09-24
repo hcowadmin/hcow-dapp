@@ -17,6 +17,47 @@ export function fmtHcow(n: number, dp = 2): string {
   return `${fmtAmount(n, dp)} HCOW`;
 }
 
+/**
+ * Every digit the number carries, at least two decimals. For the amount a user
+ * is about to sign: a 2 dp label read "Bond 0.00 HCOW" over a signed 0.001
+ * (audit 6, L-1). Same formatting the adapter uses to convert to wei, so the
+ * label and the signed value cannot differ.
+ */
+export function fmtExact(n: number): string {
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 18 });
+}
+
+export function fmtHcowExact(n: number): string {
+  return `${fmtExact(n)} HCOW`;
+}
+
+/**
+ * The shortest plain decimal string that reads back as exactly `n` (what
+ * String(n) gives), for an amount field. Exponent forms, which String() uses
+ * below 1e-6 and from 1e21, are written out instead. 0 for anything not a
+ * positive finite number.
+ */
+export function exactDecimal(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "0";
+  const s = String(n);
+  if (!/e/i.test(s)) return s;
+  return n.toLocaleString("en-US", { useGrouping: false, maximumFractionDigits: 20 });
+}
+
+/**
+ * Cut to `dp` decimals, never rounding up, as a plain decimal string. The
+ * quick-fill buttons used toFixed, which rounds half up, so MAX wrote more
+ * than the balance and the form refused its own value (audit 6, H-5). This
+ * cuts the shortest decimal form of the number, so 0.3 stays 0.3: cutting the
+ * double's full binary expansion (0.29999999999999998890) wrote 0.299999
+ * for about half of all two-decimal balances (review, 2026-09-25).
+ */
+export function floorDecimals(n: number, dp = 6): string {
+  const [int, frac = ""] = exactDecimal(n).split(".");
+  const cut = frac.slice(0, dp).replace(/0+$/, "");
+  return cut.length > 0 ? `${int}.${cut}` : int;
+}
+
 /** Percent value in 0..100. */
 export function fmtPct(n: number, dp = 1): string {
   return `${fmtAmount(n, dp)}%`;

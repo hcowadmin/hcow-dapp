@@ -58,6 +58,10 @@ export function WalletConnectModal({ open, onClose, pushToast }: WalletConnectMo
     if (!open) {
       setBusy(null);
       setShowInstall(false);
+      // The modal is mounted for the life of the tab. Without this, one
+      // person's Terms, age and jurisdiction confirmation stayed ticked for
+      // every later connection in that tab, any wallet (audit 6, L-6).
+      setAgreed(false);
     }
   }, [open]);
 
@@ -65,12 +69,17 @@ export function WalletConnectModal({ open, onClose, pushToast }: WalletConnectMo
     setBusy(provider);
     try {
       const state = await adapter.connectWallet(provider);
+      // Name the network only when the wallet is actually on it. The toast
+      // used to say "on <this app's chain>" while the wrong-network banner
+      // said otherwise (audit 6, L-5).
+      const onChain = state.chainId === PROTOCOL.CHAIN_ID;
+      const who = state.address ? ` as ${state.address.slice(0, 6)}…${state.address.slice(-4)}` : "";
       pushToast({
-        tone: "success",
+        tone: onChain ? "success" : "warning",
         title: "Wallet connected",
-        body: state.address
-          ? `Connected as ${state.address.slice(0, 6)}…${state.address.slice(-4)} on ${PROTOCOL.CHAIN_NAME}.`
-          : `Connected on ${PROTOCOL.CHAIN_NAME}.`,
+        body: onChain
+          ? `Connected${who} on ${PROTOCOL.CHAIN_NAME}.`
+          : `Connected${who}. Switch your wallet to ${PROTOCOL.CHAIN_NAME} to continue.`,
       });
       onClose();
     } catch (e) {

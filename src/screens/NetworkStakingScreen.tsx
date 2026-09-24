@@ -15,7 +15,7 @@ import type { NetworkStats, Representative, StakedPosition, TxResult, WalletStat
 import { T } from "../config/tokens";
 import { LIMITS, PROTOCOL } from "../config/constants";
 import { presentError } from "../lib/errors";
-import { fmtAmount, fmtDate, fmtHcow, fmtInt, fmtPct, shortHash } from "../lib/format";
+import { fmtAmount, fmtDate, fmtHcow, fmtHcowExact, fmtInt, fmtPct, shortHash } from "../lib/format";
 import { useAsync } from "../hooks/useAsync";
 import { PendingWithdrawalBanner } from "../components/Banners";
 import { Modal } from "../components/Modal";
@@ -147,7 +147,8 @@ export function NetworkStakingScreen({
   const amountReady = !amountEmpty && !amountInvalid;
 
   function amountHint(): string {
-    if (amountInvalid && parsed > maxForModal) return `That is more than the available ${fmtHcow(maxForModal)}.`;
+    // Every digit, like the MAX button (audit 6, H-5).
+    if (amountInvalid && parsed > maxForModal) return `That is more than the available ${fmtHcowExact(maxForModal)}.`;
     if (amountInvalid && isStake && minStake !== null && parsed < minStake) {
       return `The minimum is ${fmtHcow(minStake)}.`;
     }
@@ -458,11 +459,11 @@ export function NetworkStakingScreen({
                 void submit(
                   () => adapter.stake(parsed, rep),
                   "Delegation confirmed",
-                  `${fmtHcow(parsed)} is now staked.`,
+                  `${fmtHcowExact(parsed)} is now staked.`,
                 );
               }}
             >
-              {busy ? "Confirming…" : `Delegate ${amountReady ? fmtHcow(parsed) : "HCOW"}`}
+              {busy ? "Confirming…" : `Delegate ${amountReady ? fmtHcowExact(parsed) : "HCOW"}`}
             </Button>
           </>
         }
@@ -491,6 +492,11 @@ export function NetworkStakingScreen({
           <KV label="Rewards paid in" value="HCOW" />
           <KV label="Deduction" value="Staked HCOW is not subject to deduction" />
         </div>
+
+        {/* Two transactions when the allowance is short (audit 6, H-4). */}
+        <p style={{ margin: 0, fontSize: 13, color: T.tSec, lineHeight: 1.6 }}>
+          Your wallet may ask you to sign twice: first an approval for exactly this amount, then the stake itself.
+        </p>
       </Modal>
 
       <Modal
@@ -555,11 +561,11 @@ export function NetworkStakingScreen({
                 void submit(
                   () => adapter.requestUnstake(parsed),
                   "Unstake requested",
-                  `${fmtHcow(parsed)} enters the ${PROTOCOL.UNSTAKE_COOLDOWN_DAYS}-day cooldown.`,
+                  `${fmtHcowExact(parsed)} enters the ${PROTOCOL.UNSTAKE_COOLDOWN_DAYS}-day cooldown.`,
                 )
               }
             >
-              {busy ? "Confirming…" : `Request unstake${amountReady ? ` ${fmtHcow(parsed)}` : ""}`}
+              {busy ? "Confirming…" : `Request unstake${amountReady ? ` ${fmtHcowExact(parsed)}` : ""}`}
             </Button>
           </>
         }

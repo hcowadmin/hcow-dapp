@@ -46,6 +46,8 @@ export const PROFIT_SHARE_ABI = [
   "function claimableOf(address) view returns (uint256)",
   "function accountOf(address) view returns (uint256 bondedHcow, uint256 shares, uint256 pendingUnbond, uint64 unbondReadyAt)",
   "function lifetimeOf(address) view returns (uint256 deductedHcow, uint256 claimedUsdt)",
+  // What a pending unbond pays out now, after at most one settlement's charge.
+  "function pendingUnbondOf(address) view returns (uint256)",
   // settlements
   // Must match HCOWProfitShare.Settlement field for field. It used to omit
   // gameCompanyUsdt and teamUsdt, so every field after participantsUsdt was

@@ -188,7 +188,9 @@ const subscribers = new Set<(s: WalletState) => void>();
 const snapshot = (): WalletState => ({
   connected: session.address !== null,
   address: session.address,
-  chainId: session.chainId,
+  // The interface requires null when not connected (audit 6, M-7). The chain
+  // id is still tracked underneath so a reconnect does not have to re-read it.
+  chainId: session.address !== null ? session.chainId : null,
   balances: session.address ? { ...session.balances } : { ...ZERO_BALANCES },
 });
 
@@ -226,9 +228,28 @@ async function refreshBalances(): Promise<void> {
   session.balances = { hcow: toAmount(hcow), usdt: toAmount(usdt), bnb: toAmount(bnb) };
 }
 
+/** Orders overlapping adoptAccounts calls: only the latest may write the chain id it read. */
+let adoptSeq = 0;
+
 async function adoptAccounts(accounts: string[]): Promise<void> {
+  const seq = ++adoptSeq;
   const next = accounts.length > 0 ? (accounts[0] as Address) : null;
+  // Set before any await, so a later accountsChanged always wins (re-review R3).
   session.address = next;
+  // The chain id is cleared when the wallet could not be read (M-7). An
+  // account arriving afterwards must not be published as connected on chain
+  // null, which every write then refuses as WRONG_NETWORK (review F8).
+  if (next && session.chainId === null) {
+    try {
+      const eth = injected();
+      const id = eth ? Number((await eth.request({ method: "eth_chainId" })) as string) : null;
+      // Only if nothing newer (another account event, a chainChanged) has
+      // set it meanwhile.
+      if (id !== null && seq === adoptSeq && session.chainId === null) session.chainId = id;
+    } catch {
+      /* stays null: the wrong-network banner is then the honest state */
+    }
+  }
   if (!next) {
     session.balances = { ...ZERO_BALANCES };
     publish();
@@ -285,7 +306,7 @@ interface ProviderErrorish {
  * error name as the reason, which still renders something specific.
  */
 const REVERT_MAP: Record<string, { code: AdapterErrorCode; msg: string }> = {
-  CooldownActive: { code: "UNBOND_COOLDOWN_ACTIVE", msg: "The 7 day cooldown has not finished." },
+  CooldownActive: { code: "UNBOND_COOLDOWN_ACTIVE", msg: "The cooldown has not finished yet." },
   UnknownRepresentative: { code: "INVALID_REPRESENTATIVE", msg: "That representative does not exist." },
   RepresentativeInactive: { code: "INVALID_REPRESENTATIVE", msg: "That representative is no longer active." },
   AlreadyDelegatedElsewhere: { code: "INVALID_REPRESENTATIVE", msg: "Already delegated. Redelegate instead of staking again." },
@@ -304,6 +325,49 @@ const REVERT_MAP: Record<string, { code: AdapterErrorCode; msg: string }> = {
   ZeroAmount: { code: "TX_REVERTED", msg: "Amount must be greater than zero." },
   FaucetEmpty: { code: "TX_REVERTED", msg: "The test faucet is empty. Ask the team to refill it." },
 };
+
+function withDetail(err: AdapterError, detail: string): AdapterError {
+  err.detail = detail;
+  return err;
+}
+
+/**
+ * Reads go through this, so a page that cannot load says "network problem"
+ * instead of "Something went wrong" (audit 6, H-6). A read is never declined
+ * by the user and never reverts on the user's behalf: anything that is not
+ * already an AdapterError means the chain could not be read as expected.
+ */
+function mapRead(e: unknown): AdapterError {
+  if (e instanceof AdapterError) return e;
+  return new AdapterError("RPC_ERROR", "Could not read from the network.", e);
+}
+
+async function read<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    throw mapRead(e);
+  }
+}
+
+/** Latest block time, in ms. The contract's clock, as far as this page can see it. */
+async function chainNowMs(): Promise<number> {
+  const b = await readProvider.getBlock("latest");
+  if (!b) throw new AdapterError("RPC_ERROR", "Could not read the latest block.");
+  return secToMs(b.timestamp);
+}
+
+/**
+ * A chain time carried onto this browser's clock (audit 6, M-8). Shifted only
+ * when the browser runs AHEAD of the chain: that is the direction in which a
+ * local countdown says "ready" before the contract agrees, and the user pays
+ * gas for a certain CooldownActive revert. A browser running behind waits a
+ * little longer than it has to, which costs nothing. The latest block trails
+ * real time by a block or so, which errs the same way.
+ */
+function onLocalClock(chainMs: number, blockMs: number, localNow: number): number {
+  return chainMs + Math.max(0, localNow - blockMs);
+}
 
 function mapError(e: unknown, txHash?: Hex): AdapterError {
   if (e instanceof AdapterError) return e;
@@ -325,9 +389,11 @@ function mapError(e: unknown, txHash?: Hex): AdapterError {
   }
 
   const name = err.revert?.name;
-  if (name && REVERT_MAP[name]) {
+  if (name && Object.prototype.hasOwnProperty.call(REVERT_MAP, name)) {
     const m = REVERT_MAP[name];
-    return new AdapterError(m.code, m.msg, e, txHash);
+    // The message is written for the user, so it travels as `detail` and the
+    // toast shows it (audit 6, L-14). It used to be dropped by presentError.
+    return withDetail(new AdapterError(m.code, m.msg, e, txHash), m.msg);
   }
   if (name) {
     return new AdapterError("TX_REVERTED", `Reverted: ${name}`, e, txHash);
@@ -359,15 +425,28 @@ async function submit(send: () => Promise<TransactionResponse>): Promise<TxResul
   }
 
   const hash = tx.hash as Hex;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
   const timeout = new Promise<never>((_, reject) => {
-    setTimeout(
-      () => reject(new AdapterError("TX_TIMEOUT", "Still pending. It may yet confirm.", null, hash)),
-      PROTOCOL.TX_TIMEOUT_MS
-    );
+    timer = setTimeout(() => {
+      timedOut = true;
+      reject(new AdapterError("TX_TIMEOUT", "Still pending. It may yet confirm.", null, hash));
+    }, PROTOCOL.TX_TIMEOUT_MS);
   });
 
+  // Keep tracking after a timeout (audit 6, L-12). The toast says it may still
+  // confirm; when it does, the balances and the screens have to follow. This
+  // used to be claimed in a comment and done by nobody.
+  const mined = tx.wait(1);
+  mined.then(
+    (r) => {
+      if (timedOut && r) void refreshBalances().then(publish, publish);
+    },
+    () => undefined,
+  );
+
   try {
-    const receipt = await Promise.race([tx.wait(1), timeout]);
+    const receipt = await Promise.race([mined, timeout]);
     if (!receipt) throw new AdapterError("TX_REVERTED", "No receipt returned.", null, hash);
     if (receipt.status === 0) {
       throw new AdapterError("TX_REVERTED", "The transaction reverted.", null, hash);
@@ -379,16 +458,66 @@ async function submit(send: () => Promise<TransactionResponse>): Promise<TxResul
     return { hash, confirmed: true, blockNumber: receipt.blockNumber, failureReason: null, effectiveEpoch: null };
   } catch (e) {
     throw mapError(e, hash);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
-/** Approve exactly `amount` if the current allowance is short. Never unlimited. */
-async function ensureAllowance(signer: Signer, spender: string, amount: bigint): Promise<void> {
+/**
+ * Approve exactly `amount` if the current allowance is short. Never unlimited.
+ * Returns the approval's hash when one was sent and confirmed, else null.
+ */
+async function ensureAllowance(signer: Signer, spender: string, amount: bigint): Promise<Hex | null> {
   const owner = await signer.getAddress();
-  const current = (await reader.hcow.allowance(owner, spender)) as bigint;
-  if (current >= amount) return;
+  const current = await read(() => reader.hcow.allowance(owner, spender) as Promise<bigint>);
+  if (current >= amount) return null;
   const token = new Contract(DEPLOYMENT.addresses.hcow, ERC20_ABI, signer);
-  await submit(() => token.approve(spender, amount) as Promise<TransactionResponse>);
+  const r = await submit(() => token.approve(spender, amount) as Promise<TransactionResponse>);
+  return r.hash;
+}
+
+/**
+ * The wei to sign for `amount` against an exact on-chain limit: the wallet's
+ * HCOW, the bonded balance, the staked balance.
+ *
+ * Amounts cross the interface as JS numbers, so a balance shown in full (the
+ * MAX button) can read back a few wei above the real one: a bonded balance of
+ * 999.999999999999999999 HCOW is the number 1000 (review 2026-09-25, F1).
+ * When `amount` is exactly the limit as displayed, the limit itself is signed.
+ * Any other amount above it is refused here, before anything is sent: for a
+ * bond that is before the approval, which is also what makes INSUFFICIENT_HCOW
+ * reachable at all (audit 6, L-13; the token's own revert could not be named).
+ */
+function weiWithin(amount: Amount, limit: bigint, refuse: () => AdapterError): bigint {
+  const wei = toWei(amount);
+  if (wei === 0n) {
+    // Below one wei: the form accepts it, and the contract would revert.
+    const msg = "The amount is smaller than the smallest unit HCOW can express.";
+    throw withDetail(new AdapterError("TX_REVERTED", msg), msg);
+  }
+  if (wei <= limit) return wei;
+  if (limit > 0n && toAmount(limit) === amount) return limit;
+  throw refuse();
+}
+
+async function hcowToSpend(owner: string, amount: Amount): Promise<bigint> {
+  const balance = await read(() => reader.hcow.balanceOf(owner) as Promise<bigint>);
+  return weiWithin(amount, balance, () => new AdapterError("INSUFFICIENT_HCOW", "Not enough HCOW."));
+}
+
+/**
+ * Run the step after an approval. If it fails, the error says the approval
+ * already happened (audit 6, H-4): "Nothing was sent" was false there, and an
+ * allowance for the amount stays on chain until the next attempt uses it.
+ */
+async function afterApproval<T>(approvalHash: Hex | null, step: () => Promise<T>): Promise<T> {
+  try {
+    return await step();
+  } catch (e) {
+    const err = mapError(e);
+    if (approvalHash) err.approvalHash = approvalHash;
+    throw err;
+  }
 }
 
 // ============================================================
@@ -404,6 +533,8 @@ interface EpochBase {
 }
 let epochCache: EpochBase | null = null;
 const EPOCH_CACHE_MS = 15_000;
+/** Minimum spacing of the balance refresh driven by new blocks. */
+const BLOCK_REFRESH_MS = 15_000;
 
 /**
  * Epoch timing from the contract only (audit 6, H-3). The contract does not
@@ -497,15 +628,30 @@ export const chainAdapter: IHcowAdapter = {
       session.chainId = null;
       return snapshot();
     }
+    let accounts: string[];
+    let chainHex: string;
     try {
-      const accounts = (await eth.request({ method: "eth_accounts" })) as string[];
-      const chainHex = (await eth.request({ method: "eth_chainId" })) as string;
-      session.chainId = Number(chainHex);
-      session.address = accounts.length > 0 ? (accounts[0] as Address) : null;
-      if (session.address) await refreshBalances();
-      else session.balances = { ...ZERO_BALANCES };
+      accounts = (await eth.request({ method: "eth_accounts" })) as string[];
+      chainHex = (await eth.request({ method: "eth_chainId" })) as string;
     } catch {
-      // Leave whatever we had. Never throw out of this method.
+      // The wallet could not be read (locked, extension reloading). Report
+      // disconnected. "Leave whatever we had" returned the previous address as
+      // live, the one thing this method must never do (audit 6, M-7).
+      session.address = null;
+      session.chainId = null;
+      session.balances = { ...ZERO_BALANCES };
+      return snapshot();
+    }
+    session.chainId = Number(chainHex);
+    session.address = accounts.length > 0 ? (accounts[0] as Address) : null;
+    if (session.address) {
+      try {
+        await refreshBalances();
+      } catch {
+        // Keep the address. A balance read failure is not a disconnection.
+      }
+    } else {
+      session.balances = { ...ZERO_BALANCES };
     }
     return snapshot();
   },
@@ -592,8 +738,16 @@ export const chainAdapter: IHcowAdapter = {
       epochCache = null;
       void refreshBalances().then(publish, publish);
     };
+    // Balances follow new blocks, but not every block: BSC produces one every
+    // second or so and each refresh is three reads, which on a public node is
+    // how a tab gets rate limited into read failures (audit 6, H-6). Writes
+    // refresh on their own when they confirm.
+    let lastBlockRefresh = 0;
     const onBlock = () => {
-      if (session.address) void refreshBalances().then(publish, () => undefined);
+      const now = Date.now();
+      if (!session.address || now - lastBlockRefresh < BLOCK_REFRESH_MS) return;
+      lastBlockRefresh = now;
+      void refreshBalances().then(publish, () => undefined);
     };
 
     eth?.on?.("accountsChanged", onAccounts);
@@ -623,7 +777,7 @@ export const chainAdapter: IHcowAdapter = {
 
   async getEpoch(): Promise<Epoch> {
     // Rule G. Cached; any countdown is computed in the UI, not fetched.
-    const base = await epochBase();
+    const base = await read(epochBase);
     return {
       current: base.current,
       startsAt: base.startsAt,
@@ -633,7 +787,7 @@ export const chainAdapter: IHcowAdapter = {
   },
 
   async getLastEpochDistribution(): Promise<EpochDistribution | null> {
-    const next = Number((await reader.profitShare.nextEpoch()) as bigint);
+    const next = Number(await read(() => reader.profitShare.nextEpoch() as Promise<bigint>));
     if (next === 0) return null;
     return chainAdapter.getEpochDistribution(next - 1);
   },
@@ -654,7 +808,8 @@ export const chainAdapter: IHcowAdapter = {
     try {
       s = await reader.profitShare.getSettlement(epoch);
     } catch (e) {
-      throw mapError(e);
+      // A read: RPC_ERROR, not the write path's "The transaction reverted".
+      throw mapRead(e);
     }
     if (Number(s.settledAt) === 0) return null;
 
@@ -717,11 +872,11 @@ export const chainAdapter: IHcowAdapter = {
   async getPoolStats(): Promise<PoolStats> {
     // totalUsdtDistributed() is no longer read here: it is a lifetime figure
     // and the only field it fed is labelled 30d (adapter v0.4.2).
-    const [totalBonded, participants, w] = await Promise.all([
+    const [totalBonded, participants, w] = await read(() => Promise.all([
       reader.profitShare.totalBondedHcow() as Promise<bigint>,
       reader.profitShare.participantCount() as Promise<bigint>,
       settlementWindows(),
-    ]);
+    ]));
 
     return {
       totalBondedHcow: toAmount(totalBonded),
@@ -750,10 +905,13 @@ export const chainAdapter: IHcowAdapter = {
   },
 
   async getNetworkStats(): Promise<NetworkStats> {
-    const [counts, block] = await Promise.all([
+    const [counts, block] = await read(() => Promise.all([
       reader.staking.representativeCount() as Promise<[bigint, bigint]>,
       readProvider.getBlock("latest"),
-    ]);
+    ]));
+    // No block means no head to report. The fallback used to be Date.now(),
+    // which stamped a live-looking chain head on a failed read (audit 6, L-7).
+    if (!block) throw new AdapterError("RPC_ERROR", "Could not read the latest block.");
     const total = Number(counts[0]);
     const active = Number(counts[1]);
     return {
@@ -762,17 +920,22 @@ export const chainAdapter: IHcowAdapter = {
       // Deliberately crude: this reflects registry state, not validator uptime,
       // because nothing here runs validators. Real health needs monitoring.
       networkStatus: active === 0 ? "down" : active < total ? "degraded" : "healthy",
-      lastBlockAt: block ? secToMs(block.timestamp) : Date.now(),
+      lastBlockAt: secToMs(block.timestamp),
     };
   },
 
   async getBurnStats(): Promise<BurnStats> {
-    const [supply, deducted, windows] = await Promise.all([
+    const [supply, deducted, windows] = await read(() => Promise.all([
       reader.hcow.totalSupply() as Promise<bigint>,
       reader.profitShare.totalHcowDeducted() as Promise<bigint>,
       revenueWindows(),
-    ]);
-    const w = windows?.[0] ?? null;
+    ]));
+    // A row whose numbers do not parse is treated as no row (audit 6, M-2):
+    // BigInt("1.5") threw and took the whole panel down.
+    const w0 = windows?.[0] ?? null;
+    const burned24 = w0 ? weiFromIndex(w0.burned_24h) : null;
+    const burned30 = w0 ? weiFromIndex(w0.burned_30d) : null;
+    const w = burned24 !== null && burned30 !== null ? { burned24, burned30 } : null;
     const circulating = toAmount(supply);
     // HCOW is fixed supply with no mint, so anything missing from totalSupply
     // was burned. This holds for the profit-share deduction burn and for any
@@ -782,14 +945,14 @@ export const chainAdapter: IHcowAdapter = {
 
     return {
       totalBurnedHcow: burned,
-      burnedToday: w ? toAmount(BigInt(w.burned_24h)) : 0,
+      burnedToday: w ? toAmount(w.burned24) : 0,
       // Deduction happens at settlement, so the in-flight epoch has burned
       // nothing yet by construction. This is a real zero, not a missing one.
       burnedThisEpoch: 0,
       percentOfSupply: (burned / PROTOCOL.TOKEN_TOTAL_SUPPLY) * 100,
       // No transaction-fee burn path exists on this token. Structurally zero.
       last30dTxFeeBurn: 0,
-      last30dGamePaymentBurn: w ? toAmount(BigInt(w.burned_30d)) : toAmount(deducted),
+      last30dGamePaymentBurn: w ? toAmount(w.burned30) : toAmount(deducted),
     };
   },
 
@@ -798,7 +961,8 @@ export const chainAdapter: IHcowAdapter = {
       throw new AdapterError("WALLET_NOT_CONNECTED", "Connect a wallet first.");
     }
     const addr = session.address;
-    const [account, claimable, totalBonded, lifetime] = await Promise.all([
+    const localNow = Date.now();
+    const [account, claimable, totalBonded, lifetime, payout, blockMs] = await read(() => Promise.all([
       reader.profitShare.accountOf(addr) as Promise<{
         bondedHcow: bigint;
         shares: bigint;
@@ -811,7 +975,12 @@ export const chainAdapter: IHcowAdapter = {
         deductedHcow: bigint;
         claimedUsdt: bigint;
       }>,
-    ]);
+      // What the pending unbond pays out now. accountOf's pendingUnbond is the
+      // amount as requested; the contract charges a pending unbond for at most
+      // one settlement, so the payout can be lower (v0.4.5).
+      reader.profitShare.pendingUnbondOf(addr) as Promise<bigint>,
+      chainNowMs(),
+    ]));
 
     const bonded = toAmount(account.bondedHcow);
     const pending = toAmount(account.pendingUnbond);
@@ -832,9 +1001,12 @@ export const chainAdapter: IHcowAdapter = {
       // null, "not forecast" (adapter v0.4.2). A 0 under a "Forecast" label
       // was an invented number (audit 6, M-5).
       estimatedEpochUsdt: null,
-      pendingUnbondAmount: pending > 0 ? pending : null,
-      // Rule H. Chain value, never Date.now() + cooldown.
-      pendingUnbondReadyAt: readyAt > 0 ? secToMs(readyAt) : null,
+      // Keyed on the request, not the payout: a pending unbond is pending even
+      // if the charge took all of it.
+      pendingUnbondAmount: pending > 0 ? toAmount(payout) : null,
+      // Rule H. Chain value, never Date.now() + cooldown; on this browser's
+      // clock only when that clock runs ahead (M-8).
+      pendingUnbondReadyAt: readyAt > 0 ? onLocalClock(secToMs(readyAt), blockMs, localNow) : null,
       pendingClaimUsdt: toAmount(claimable),
       // Reconstructed from the deduction accumulator, so it is correct
       // between settlements without anyone having to poke the contract.
@@ -847,14 +1019,19 @@ export const chainAdapter: IHcowAdapter = {
     if (!session.address) {
       throw new AdapterError("WALLET_NOT_CONNECTED", "Connect a wallet first.");
     }
-    const d = (await reader.staking.delegationOf(session.address)) as {
-      repId: string;
-      stakedAmount: bigint;
-      pendingUnstake: bigint;
-      unstakeReadyAt: bigint;
-      pendingReward: bigint;
-      lifetimeClaimed: bigint;
-    };
+    const addr = session.address;
+    const localNow = Date.now();
+    const [d, blockMs] = await read(() => Promise.all([
+      reader.staking.delegationOf(addr) as Promise<{
+        repId: string;
+        stakedAmount: bigint;
+        pendingUnstake: bigint;
+        unstakeReadyAt: bigint;
+        pendingReward: bigint;
+        lifetimeClaimed: bigint;
+      }>,
+      chainNowMs(),
+    ]));
 
     const staked = toAmount(d.stakedAmount);
     const pending = toAmount(d.pendingUnstake);
@@ -871,15 +1048,15 @@ export const chainAdapter: IHcowAdapter = {
       delegatedTo: d.repId && d.repId !== ZERO_BYTES32 ? safeDecodeId(d.repId) : null,
       estimatedAprPct: null,
       pendingUnstakeAmount: pending > 0 ? pending : null,
-      pendingUnstakeReadyAt: readyAt > 0 ? secToMs(readyAt) : null,
+      pendingUnstakeReadyAt: readyAt > 0 ? onLocalClock(secToMs(readyAt), blockMs, localNow) : null,
       pendingRewardHcow: toAmount(d.pendingReward),
       lifetimeRewardHcow: toAmount(d.lifetimeClaimed),
     };
   },
 
   async getRepresentatives(): Promise<Representative[]> {
-    const ids = (await reader.staking.representativeIds()) as string[];
-    const rows = await Promise.all(
+    const ids = await read(() => reader.staking.representativeIds() as Promise<string[]>);
+    const rows = await read(() => Promise.all(
       ids.map(async (id) => {
         const r = (await reader.staking.representativeOf(id)) as {
           name: string;
@@ -906,7 +1083,7 @@ export const chainAdapter: IHcowAdapter = {
         };
         return rep;
       })
-    );
+    ));
     return rows;
   },
 
@@ -924,10 +1101,14 @@ export const chainAdapter: IHcowAdapter = {
 
     const out: Transaction[] = [];
     for (const row of rows) {
-      const type = EVENT_TO_TX[row.event];
+      if (!row || typeof row !== "object") continue;   // the index is untrusted (M-2)
+      // Own keys only: row.event "constructor" or "toString" found a function
+      // on the object's prototype and passed it on as a TxType (audit 6, M-2).
+      const type = Object.prototype.hasOwnProperty.call(EVENT_TO_TX, row.event) ? EVENT_TO_TX[row.event] : undefined;
       if (!type) continue;               // protocol events with no user lane
       if (!matchesFilter(type, filter)) continue;
-      out.push(toTransaction(row, type));
+      const tx = toTransaction(row, type);
+      if (tx) out.push(tx);
     }
     return out;
   },
@@ -936,14 +1117,22 @@ export const chainAdapter: IHcowAdapter = {
 
   async bond(amount: Amount): Promise<TxResult> {
     const signer = await requireSigner();
-    const wei = toWei(amount);
-    await ensureAllowance(signer, DEPLOYMENT.addresses.profitShare, wei);
+    const wei = await hcowToSpend(await signer.getAddress(), amount);
+    const approval = await ensureAllowance(signer, DEPLOYMENT.addresses.profitShare, wei);
 
     const c = new Contract(DEPLOYMENT.addresses.profitShare, PROFIT_SHARE_ABI, signer);
-    const result = await submit(() => c.bond(wei) as Promise<TransactionResponse>);
+    const result = await afterApproval(approval, () => submit(() => c.bond(wei) as Promise<TransactionResponse>));
 
     epochCache = null;
-    const next = Number((await reader.profitShare.nextEpoch()) as bigint);
+    // The bond is confirmed. A failed read of the epoch number after it must
+    // not turn a confirmed bond into an error toast, which invited a second
+    // bond (audit 6, L-11).
+    let next: number | null = null;
+    try {
+      next = Number((await reader.profitShare.nextEpoch()) as bigint);
+    } catch {
+      next = null;
+    }
     return { ...result, effectiveEpoch: next };
   },
 
@@ -954,8 +1143,14 @@ export const chainAdapter: IHcowAdapter = {
 
   async requestUnbond(amount: Amount): Promise<TxResult> {
     const signer = await requireSigner();
+    const owner = await signer.getAddress();
+    // Against the exact bonded balance, so "unbond everything" is exactly
+    // everything and not a certain InsufficientBonded revert (review F1).
+    const bonded = await read(() => reader.profitShare.bondedOf(owner) as Promise<bigint>);
+    const msg = "That is more than your bonded balance.";
+    const wei = weiWithin(amount, bonded, () => withDetail(new AdapterError("TX_REVERTED", msg), msg));
     const c = new Contract(DEPLOYMENT.addresses.profitShare, PROFIT_SHARE_ABI, signer);
-    return submit(() => c.requestUnbond(toWei(amount)) as Promise<TransactionResponse>);
+    return submit(() => c.requestUnbond(wei) as Promise<TransactionResponse>);
   },
 
   async cancelUnbond(): Promise<TxResult> {
@@ -967,13 +1162,20 @@ export const chainAdapter: IHcowAdapter = {
   async withdrawUnbonded(): Promise<TxResult> {
     if (!session.address) throw new AdapterError("WALLET_NOT_CONNECTED", "Connect a wallet first.");
     // Re-verify against chain state before spending gas on a certain revert.
-    const account = (await reader.profitShare.accountOf(session.address)) as { unbondReadyAt: bigint };
+    const addr = session.address;
+    const [account, nowMs] = await read(() => Promise.all([
+      reader.profitShare.accountOf(addr) as Promise<{ unbondReadyAt: bigint }>,
+      chainNowMs(),
+    ]));
     const readyAt = Number(account.unbondReadyAt);
     if (readyAt === 0) {
-      throw new AdapterError("TX_REVERTED", "No unbond is pending.");
+      throw withDetail(new AdapterError("TX_REVERTED", "No unbond is pending."), "No unbond is pending.");
     }
-    if (secToMs(readyAt) > Date.now()) {
-      throw new AdapterError("UNBOND_COOLDOWN_ACTIVE", "The 7 day cooldown has not finished.");
+    // Against the chain's clock, the one the contract checks. The browser's
+    // clock let a fast machine through to a certain revert (audit 6, M-8).
+    if (secToMs(readyAt) > nowMs) {
+      const msg = `The ${PROTOCOL.UNBOND_COOLDOWN_DAYS}-day unbond cooldown has not finished yet.`;
+      throw withDetail(new AdapterError("UNBOND_COOLDOWN_ACTIVE", msg), msg);
     }
     const signer = await requireSigner();
     const c = new Contract(DEPLOYMENT.addresses.profitShare, PROFIT_SHARE_ABI, signer);
@@ -993,11 +1195,11 @@ export const chainAdapter: IHcowAdapter = {
     const id = encodeId(representativeId);
     await assertRepresentativeUsable(id);
 
-    const wei = toWei(amount);
-    await ensureAllowance(signer, DEPLOYMENT.addresses.staking, wei);
+    const wei = await hcowToSpend(await signer.getAddress(), amount);
+    const approval = await ensureAllowance(signer, DEPLOYMENT.addresses.staking, wei);
 
     const c = new Contract(DEPLOYMENT.addresses.staking, STAKING_ABI, signer);
-    return submit(() => c.stake(wei, id) as Promise<TransactionResponse>);
+    return afterApproval(approval, () => submit(() => c.stake(wei, id) as Promise<TransactionResponse>));
   },
 
   async redelegate(toRepresentativeId: string): Promise<TxResult> {
@@ -1010,8 +1212,12 @@ export const chainAdapter: IHcowAdapter = {
 
   async requestUnstake(amount: Amount): Promise<TxResult> {
     const signer = await requireSigner();
+    const owner = await signer.getAddress();
+    const d = await read(() => reader.staking.delegationOf(owner) as Promise<{ stakedAmount: bigint }>);
+    const msg = "That is more than your staked balance.";
+    const wei = weiWithin(amount, d.stakedAmount, () => withDetail(new AdapterError("TX_REVERTED", msg), msg));
     const c = new Contract(DEPLOYMENT.addresses.staking, STAKING_ABI, signer);
-    return submit(() => c.requestUnstake(toWei(amount)) as Promise<TransactionResponse>);
+    return submit(() => c.requestUnstake(wei) as Promise<TransactionResponse>);
   },
 
   async cancelUnstake(): Promise<TxResult> {
@@ -1022,11 +1228,18 @@ export const chainAdapter: IHcowAdapter = {
 
   async withdrawUnstaked(): Promise<TxResult> {
     if (!session.address) throw new AdapterError("WALLET_NOT_CONNECTED", "Connect a wallet first.");
-    const d = (await reader.staking.delegationOf(session.address)) as { unstakeReadyAt: bigint };
+    const addr = session.address;
+    const [d, nowMs] = await read(() => Promise.all([
+      reader.staking.delegationOf(addr) as Promise<{ unstakeReadyAt: bigint }>,
+      chainNowMs(),
+    ]));
     const readyAt = Number(d.unstakeReadyAt);
-    if (readyAt === 0) throw new AdapterError("TX_REVERTED", "No unstake is pending.");
-    if (secToMs(readyAt) > Date.now()) {
-      throw new AdapterError("UNBOND_COOLDOWN_ACTIVE", "The 7 day cooldown has not finished.");
+    if (readyAt === 0) throw withDetail(new AdapterError("TX_REVERTED", "No unstake is pending."), "No unstake is pending.");
+    // Chain clock (M-8). The code set has no unstake-specific cooldown code;
+    // the message says which cooldown it is (M-9 noted the unbond wording here).
+    if (secToMs(readyAt) > nowMs) {
+      const msg = `The ${PROTOCOL.UNSTAKE_COOLDOWN_DAYS}-day unstake cooldown has not finished yet.`;
+      throw withDetail(new AdapterError("UNBOND_COOLDOWN_ACTIVE", msg), msg);
     }
     const signer = await requireSigner();
     const c = new Contract(DEPLOYMENT.addresses.staking, STAKING_ABI, signer);
@@ -1053,17 +1266,27 @@ export const chainAdapter: IHcowAdapter = {
           // the amounts and the remaining supply. The banner can then say what
           // the faucet offers before a wallet is attached.
           const who = session.address ?? "0x0000000000000000000000000000000000000000";
-          const s = (await faucetReader.status(who)) as [
-            bigint, bigint, bigint, bigint, bigint, bigint,
-          ];
+          const s = await read(() => faucetReader.status(who) as Promise<[
+            bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint, bigint,
+          ]>);
           const readyAt = Number(s[4]);
           return {
             hcowPerClaim: toAmount(s[0]),
             usdtPerClaim: toAmount(s[1]),
             hcowRemaining: toAmount(s[2]),
             usdtRemaining: toAmount(s[3]),
+            // The contract returns 0 once the account may claim again.
             readyAt: readyAt > 0 ? secToMs(readyAt) : null,
             claimsLeft: Number(s[5]),
+            // hcowNow / usdtNow: what a claim pays right now, per token. The
+            // contract's own comment asks the UI to use these rather than
+            // claimsLeft, which reads 0 while one side can still pay.
+            hcowNow: toAmount(s[8]),
+            usdtNow: toAmount(s[9]),
+            // The faucet's shared per-window limit. When it is used up the
+            // contract reports both sides as 0 although it still holds tokens.
+            windowClaimsLeft: Number(s[6]),
+            windowResetsAt: Number(s[7]) > 0 ? secToMs(s[7]) : null,
           };
         },
 
@@ -1120,27 +1343,48 @@ function matchesFilter(type: TxType, filter: TxFilter): boolean {
  * An indexed event is by definition already mined, so status is always
  * confirmed. Pending transactions are the write path's business, not history's.
  */
-function toTransaction(row: ChainEventRow, type: TxType): Transaction {
-  const raw = row.args.hcowAmount ?? row.args.amount ?? null;
+function toTransaction(row: ChainEventRow, type: TxType): Transaction | null {
+  // The index is outside this app's trust boundary (audit 6, M-2). A row
+  // without a usable hash, time or block is dropped rather than rendered as a
+  // dead link or "Invalid Date". Nothing from here ever reaches a transaction.
+  const timestamp = Date.parse(row.block_time);
+  if (typeof row.tx_hash !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(row.tx_hash)) return null;
+  if (!Number.isFinite(timestamp) || !Number.isFinite(row.block_number)) return null;
+  const args = row.args ?? {};
+  const raw = args.hcowAmount ?? args.amount ?? null;
   return {
     hash: row.tx_hash as Hex,
     type,
     status: "confirmed",
-    timestamp: new Date(row.block_time).getTime(),
+    timestamp,
     blockNumber: row.block_number,
-    amount: raw === null ? null : toAmount(BigInt(raw)),
+    // An amount that is not a plain wei integer is shown as unknown, never as
+    // 0: BigInt("") is 0n, so an empty string rendered a real bond as "0 HCOW".
+    amount: raw === null ? null : weiFromIndex(raw) === null ? null : toAmount(weiFromIndex(raw) as bigint),
     // Only epoch_settlement rows carry a separate reward, and those are not
     // produced here yet. See CHAIN_ADAPTER_GAPS.
     rewardAmount: null,
     meta: {
-      fromRepresentative: row.args.fromRep ? safeDecodeId(row.args.fromRep) : undefined,
-      toRepresentative: row.args.toRep
-        ? safeDecodeId(row.args.toRep)
-        : row.args.repId
-        ? safeDecodeId(row.args.repId)
+      fromRepresentative: args.fromRep ? safeDecodeId(args.fromRep) : undefined,
+      toRepresentative: args.toRep
+        ? safeDecodeId(args.toRep)
+        : args.repId
+        ? safeDecodeId(args.repId)
         : undefined,
     },
   };
+}
+
+/**
+ * A wei amount from the index, else null. Event arguments are stored as
+ * decimal strings; the rollup views are Postgres numeric sums, which PostgREST
+ * may send as JSON numbers. Anything that is not a non-negative integer in
+ * either form is not an amount.
+ */
+function weiFromIndex(v: unknown): bigint | null {
+  if (typeof v === "string") return /^[0-9]+$/.test(v) ? BigInt(v) : null;
+  if (typeof v === "number") return Number.isInteger(v) && v >= 0 ? BigInt(v) : null;
+  return null;
 }
 
 // ============================================================
@@ -1174,10 +1418,18 @@ async function assertRepresentativeUsable(id: string): Promise<void> {
   let r: { active: boolean };
   try {
     r = (await reader.staking.representativeOf(id)) as { active: boolean };
-  } catch {
-    throw new AdapterError("INVALID_REPRESENTATIVE", "That representative does not exist.");
+  } catch (e) {
+    // Only the contract's own answer means "does not exist". Any other failure
+    // is the network, and used to send the user off to pick another node that
+    // was just as unreachable (audit 6, L-15).
+    if ((e as ProviderErrorish).revert?.name === "UnknownRepresentative") {
+      const msg = "That representative does not exist.";
+      throw withDetail(new AdapterError("INVALID_REPRESENTATIVE", msg, e), msg);
+    }
+    throw mapRead(e);
   }
   if (!r.active) {
-    throw new AdapterError("INVALID_REPRESENTATIVE", "That representative is no longer active.");
+    const msg = "That representative is no longer active.";
+    throw withDetail(new AdapterError("INVALID_REPRESENTATIVE", msg), msg);
   }
 }

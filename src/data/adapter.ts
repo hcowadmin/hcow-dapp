@@ -69,6 +69,30 @@
  *     stallDeadlineAt (epochStallDeadline()), after which anyone may close the
  *     epoch with no payout.
  *
+ * 18. v0.4.5 (audit 6, H-4, H-6, M-7, M-8, faucet): additions only, nothing
+ *     removed.
+ *     - AdapterError.approvalHash: set when a bond or stake confirmed its
+ *       approval transaction and the step after it then failed. The approval
+ *       stays on chain, so the UI must not say "Nothing was sent".
+ *     - Read methods throw AdapterError. A failure to reach or read the chain
+ *       is RPC_ERROR, not a raw provider error (it rendered as "Something went
+ *       wrong" at the most common failure point, page load).
+ *     - pendingUnbondAmount is what the pending unbond would pay out now
+ *       (pendingUnbondOf), which can be below the amount requested: a
+ *       pending unbond is charged for at most one settlement.
+ *     - pendingUnbondReadyAt and pendingUnstakeReadyAt are the chain's time
+ *       carried onto this browser's clock when that clock runs ahead, so a
+ *       countdown computed with Date.now() cannot finish before the chain's.
+ *     - AdapterError.detail: the specific reason, for the UI to show.
+ *     - FaucetStatus.hcowNow / usdtNow: what a claim would pay right now;
+ *       windowClaimsLeft / windowResetsAt: the shared per-window limit.
+ *     - bond, stake, requestUnbond and requestUnstake sign the exact on-chain
+ *       balance when the amount is that balance as displayed (a JS number can
+ *       read a few wei above it), and refuse any other amount above it before
+ *       anything is sent.
+ *     - getWalletState returns disconnected, never the previous address, when
+ *       the wallet cannot be read; chainId is null whenever connected is false.
+ *
  * ---------------------------------------------------------------------------
  * DISTRIBUTION POLICY  v0.4   (read before implementing any money field)
  * ---------------------------------------------------------------------------
@@ -329,9 +353,18 @@ export interface BondedPosition {
    * null until that backend exists (v0.4.2). Never render null as 0.
    */
   estimatedEpochUsdt: Amount | null;
-  /** null when no unbond is pending. Never undefined. */
+  /**
+   * null when no unbond is pending. Never undefined. What the pending unbond
+   * would pay out now (pendingUnbondOf), after the deduction it has sat
+   * through: at most one settlement's, so it can be below the amount
+   * requested (v0.4.5).
+   */
   pendingUnbondAmount: Amount | null;
-  /** Chain-authoritative. Never compute this from the client clock. */
+  /**
+   * Chain-authoritative: unbondReadyAt from the contract, never Date.now() +
+   * cooldown. Carried onto this browser's clock when the clock runs ahead of
+   * the chain, so a local countdown cannot reach zero early (v0.4.5, M-8).
+   */
   pendingUnbondReadyAt: Timestamp | null;
   pendingClaimUsdt: Amount;
   lifetimeDeductedHcow: Amount;
@@ -405,6 +438,7 @@ export interface StakedPosition {
   delegatedTo: string | null;
   estimatedAprPct: Percent | null;
   pendingUnstakeAmount: Amount | null;
+  /** As pendingUnbondReadyAt: chain value, carried onto this browser's clock when it runs ahead. */
   pendingUnstakeReadyAt: Timestamp | null;
   pendingRewardHcow: Amount;
   lifetimeRewardHcow: Amount;
@@ -508,6 +542,20 @@ export interface FaucetStatus {
   readyAt: Timestamp | null;
   /** How many more claims the faucet can serve before it runs dry. */
   claimsLeft: number;
+  /**
+   * What a claim would actually pay this account right now, per token (v0.4.5).
+   * The two sides are paid independently, so claimsLeft can read 0 while a
+   * claim would still pay one of them. 0 while readyAt is set.
+   */
+  hcowNow: Amount;
+  usdtNow: Amount;
+  /**
+   * Claims left in the faucet's shared window, for everyone. At 0 the contract
+   * reports hcowNow and usdtNow as 0 while it still holds tokens; claims
+   * reopen at windowResetsAt (null when no window is running).
+   */
+  windowClaimsLeft: number;
+  windowResetsAt: Timestamp | null;
 }
 
 export interface IHcowAdapter {
@@ -605,6 +653,20 @@ export class AdapterError extends Error {
   cause?: unknown;
   /** Present on TX_TIMEOUT so the UI can link to BscScan while it waits. */
   txHash?: Hex;
+  /**
+   * v0.4.5. Set when this call confirmed an approval transaction and a later
+   * step then failed. The allowance stays on chain, so "Nothing was sent" is
+   * false (audit 6, H-4).
+   */
+  approvalHash?: Hex;
+  /**
+   * v0.4.5. A sentence written for the user, safe to show as is: the named
+   * contract error behind a revert, or a pre-flight check. The UI used to
+   * discard the message and show only the code's generic text, so a revert
+   * the adapter had identified exactly still read as "The network rejected
+   * this transaction" (audit 6, L-14).
+   */
+  detail?: string;
 
   constructor(code: AdapterErrorCode, message: string, cause?: unknown, txHash?: Hex) {
     super(message);

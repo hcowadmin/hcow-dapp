@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
 import { T } from "../config/tokens";
 import { EXTERNAL_LINKS, PROTOCOL } from "../config/constants";
 import { DEPLOYMENT } from "../config/deployment";
-import { fmtCountdown, fmtDate, fmtHcow } from "../lib/format";
+import { fmtCountdown, fmtDate, fmtHcow, fmtUsdt } from "../lib/format";
 import { useCountdown } from "../hooks/useCountdown";
 import { Badge, Button, ExtLink, MONO, toneColors } from "./ui";
 import type { Tone } from "./ui";
@@ -106,24 +106,32 @@ export function TestnetStrip() {
    ============================================================ */
 
 interface FaucetBannerProps {
-  hcowPerClaim: number;
-  usdtPerClaim: number;
-  claimsLeft: number;
+  /** What a claim pays right now, per token. 0 for a side the faucet cannot pay. */
+  hcowNow: number;
+  usdtNow: number;
   readyAt: number | null;
+  /** The shared per-window limit. At 0 both sides read 0 although the faucet still holds tokens. */
+  windowClaimsLeft: number;
+  windowResetsAt: number | null;
   busy: boolean;
   onClaim: () => void;
 }
 
 export function FaucetBanner({
-  hcowPerClaim,
-  usdtPerClaim,
-  claimsLeft,
+  hcowNow,
+  usdtNow,
   readyAt,
+  windowClaimsLeft,
+  windowResetsAt,
   busy,
   onClaim,
 }: FaucetBannerProps) {
-  const empty = claimsLeft === 0;
+  // Empty only when a claim would pay nothing at all. The two tokens are paid
+  // independently, and the button used to be disabled on claimsLeft, which
+  // counts full allowances and reads 0 while one side can still pay.
+  const empty = hcowNow <= 0 && usdtNow <= 0;
   const waiting = readyAt !== null;
+  const windowFull = windowClaimsLeft === 0;
 
   return (
     <BannerShell
@@ -136,19 +144,43 @@ export function FaucetBanner({
         </Button>
       }
     >
-      {empty ? (
-        <>The faucet is out of test tokens. Ask the team to refill it.</>
-      ) : waiting ? (
+      {waiting ? (
         <>
           Already claimed. Next claim after{" "}
           <span style={MONO}>{fmtDate(readyAt as number)}</span>.
         </>
+      ) : empty && windowFull ? (
+        <>
+          {/* The shared limit, not an empty faucet. Nothing is claimed about
+              the faucet's balance here (re-review R5). */}
+          Today&apos;s claims for everyone are used up
+          {windowResetsAt !== null ? (
+            <>
+              . Claims reopen after <span style={MONO}>{fmtDate(windowResetsAt)}</span>
+            </>
+          ) : null}
+          .
+        </>
+      ) : empty ? (
+        <>The faucet is out of test tokens. Ask the team to refill it.</>
       ) : (
         <>
-          Take <span style={MONO}>{fmtHcow(hcowPerClaim)} HCOW</span> and{" "}
-          <span style={MONO}>{usdtPerClaim.toLocaleString()} USDT</span> to try bonding.
-          One claim per address per day, <span style={MONO}>{claimsLeft}</span> left in the
-          faucet. These are test tokens and cannot be sold or transferred for value.
+          {/* fmtHcow already ends in "HCOW" ("10,000.00 HCOW HCOW", audit 6, L-2). */}
+          A claim now gives{" "}
+          {hcowNow > 0 && usdtNow > 0 ? (
+            <>
+              <span style={MONO}>{fmtHcow(hcowNow)}</span> and <span style={MONO}>{fmtUsdt(usdtNow)}</span>
+            </>
+          ) : hcowNow > 0 ? (
+            <>
+              <span style={MONO}>{fmtHcow(hcowNow)}</span> only. The faucet has no test USDT left
+            </>
+          ) : (
+            <>
+              <span style={MONO}>{fmtUsdt(usdtNow)}</span> only. The faucet has no test HCOW left
+            </>
+          )}
+          . One claim per address per day. These are test tokens and cannot be sold or transferred for value.
         </>
       )}
     </BannerShell>

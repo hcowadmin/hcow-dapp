@@ -33,7 +33,10 @@ async function query<T>(path: string): Promise<T[] | null> {
       },
     });
     if (!res.ok) return null;
-    return (await res.json()) as T[];
+    const body: unknown = await res.json();
+    // Anything but an array is not a result set (audit 6, M-2). The rows
+    // themselves are checked field by field where they are used.
+    return Array.isArray(body) ? (body as T[]) : null;
   } catch {
     // The index being unreachable must never break a page that can still read
     // balances straight from the chain.
@@ -61,13 +64,14 @@ export interface SettlementRow {
   hcow_deducted: string;
 }
 
+/** Postgres numeric sums. PostgREST may send them as strings or as JSON numbers. */
 export interface WindowRow {
-  gross_24h: string;
-  gross_7d: string;
-  gross_30d: string;
-  participants_30d: string;
-  burned_24h: string;
-  burned_30d: string;
+  gross_24h: string | number;
+  gross_7d: string | number;
+  gross_30d: string | number;
+  participants_30d: string | number;
+  burned_24h: string | number;
+  burned_30d: string | number;
 }
 
 /** Most recent first. `limit` is a hard cap, not a page size: there is no UI for paging yet. */

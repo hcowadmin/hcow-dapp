@@ -9,7 +9,7 @@ import { useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { T } from "../config/tokens";
 import { addressUrl } from "../config/constants";
-import { fmtAmount, shortHash } from "../lib/format";
+import { exactDecimal, floorDecimals, fmtAmount, shortHash } from "../lib/format";
 
 /** Top-level destinations. Lives here so screens and the shell agree. */
 export type Route = "home" | "profit" | "staking" | "portfolio";
@@ -637,6 +637,8 @@ export interface AmountInputProps {
 }
 
 const QUICK: readonly number[] = [0.25, 0.5, 0.75, 1];
+/** Decimals a quick-fill button writes. The remainder below it stays where it is. */
+const QUICK_DP = 6;
 
 export function AmountInput({
   id,
@@ -722,7 +724,13 @@ export function AmountInput({
               variant="secondary"
               disabled={disabled}
               ariaLabel={`Set amount to ${Math.round(q * 100)} percent of ${fmtAmount(maxValue, 2)} ${ticker}`}
-              onClick={() => onChange(String(Number((maxValue * q).toFixed(6))))}
+              // MAX writes the balance exactly as shown (it reads back as the
+              // same number, so the form accepts it and the adapter signs the
+              // exact on-chain balance for it). The fractions are cut to
+              // QUICK_DP decimals, never rounded up. toFixed rounded half up,
+              // so MAX wrote more than the balance and the form refused the
+              // value it had just filled in (audit 6, H-5).
+              onClick={() => onChange(q === 1 ? exactDecimal(maxValue) : floorDecimals(maxValue * q, QUICK_DP))}
             >
               {q === 1 ? "MAX" : `${Math.round(q * 100)}%`}
             </Button>

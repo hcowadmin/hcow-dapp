@@ -15,7 +15,7 @@ import type { BondedPosition, Epoch, PoolStats, TxResult, WalletState } from "..
 import { T } from "../config/tokens";
 import { LIMITS, PROTOCOL } from "../config/constants";
 import { presentError } from "../lib/errors";
-import { fmtAmount, fmtCountdown, fmtDate, fmtHcow, fmtInt, fmtRatioPct, fmtUsdt, shortHash } from "../lib/format";
+import { fmtAmount, fmtCountdown, fmtDate, fmtHcow, fmtHcowExact, fmtInt, fmtRatioPct, fmtUsdt, shortHash } from "../lib/format";
 import { useAsync } from "../hooks/useAsync";
 import { useCountdown } from "../hooks/useCountdown";
 import { PendingWithdrawalBanner, ProfitShareWarningBanner } from "../components/Banners";
@@ -151,7 +151,9 @@ export function ProfitShareScreen({
 
   function amountHint(): string {
     if (amountInvalid && parsed > maxForModal) {
-      return `That is more than the available ${fmtHcow(maxForModal)}.`;
+      // Every digit, like the MAX button. A 2 dp figure rounded up told the
+      // user the limit was higher than the value MAX had just written (H-5).
+      return `That is more than the available ${fmtHcowExact(maxForModal)}.`;
     }
     if (amountInvalid && isDeposit && minBond !== null && parsed < minBond) {
       return `The minimum is ${fmtHcow(minBond)}.`;
@@ -326,7 +328,7 @@ export function ProfitShareScreen({
                 right={<Badge tone={pos.status === "active" ? "ok" : pos.status === "cooldown" ? "info" : "muted"}>{STATUS_LABEL[pos.status]}</Badge>}
               >
                 <KV label="Bonded" value={fmtHcow(pos.bondedAmount)} emphasis />
-                <KV label="Share of pool" value={fmtRatioPct(pos.shareOfPool)} sub="At the last snapshot." />
+                <KV label="Share of pool" value={fmtRatioPct(pos.shareOfPool)} sub="Of the HCOW bonded right now." />
                 <KV
                   label="Forecast for this epoch"
                   value={
@@ -413,11 +415,11 @@ export function ProfitShareScreen({
                 void submit(
                   () => (modal === "topup" ? adapter.topUpBond(parsed) : adapter.bond(parsed)),
                   modal === "topup" ? "Top-up confirmed" : "Bond confirmed",
-                  `${fmtHcow(parsed)} is bonded from the next epoch.`,
+                  `${fmtHcowExact(parsed)} is bonded from the next epoch.`,
                 )
               }
             >
-              {busy ? "Confirming…" : `${modal === "topup" ? "Top up" : "Bond"} ${amountReady ? fmtHcow(parsed) : "HCOW"}`}
+              {busy ? "Confirming…" : `${modal === "topup" ? "Top up" : "Bond"} ${amountReady ? fmtHcowExact(parsed) : "HCOW"}`}
             </Button>
           </>
         }
@@ -443,6 +445,11 @@ export function ProfitShareScreen({
           <KV label="Takes effect" value="Next epoch snapshot" />
           <KV label="Cooldown to exit" value={`${PROTOCOL.UNBOND_COOLDOWN_DAYS} days`} />
         </div>
+
+        {/* Two transactions when the allowance is short (audit 6, H-4). */}
+        <p style={{ margin: 0, fontSize: 13, color: T.tSec, lineHeight: 1.6 }}>
+          Your wallet may ask you to sign twice: first an approval for exactly this amount, then the bond itself.
+        </p>
 
         <div
           style={{
@@ -489,11 +496,11 @@ export function ProfitShareScreen({
                 void submit(
                   () => adapter.requestUnbond(parsed),
                   "Unbond requested",
-                  `${fmtHcow(parsed)} enters the ${PROTOCOL.UNBOND_COOLDOWN_DAYS}-day cooldown.`,
+                  `${fmtHcowExact(parsed)} enters the ${PROTOCOL.UNBOND_COOLDOWN_DAYS}-day cooldown.`,
                 )
               }
             >
-              {busy ? "Confirming…" : `Request unbond${amountReady ? ` ${fmtHcow(parsed)}` : ""}`}
+              {busy ? "Confirming…" : `Request unbond${amountReady ? ` ${fmtHcowExact(parsed)}` : ""}`}
             </Button>
           </>
         }
