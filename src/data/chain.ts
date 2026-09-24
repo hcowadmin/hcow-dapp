@@ -398,24 +398,41 @@ async function ensureAllowance(signer: Signer, spender: string, amount: bigint):
 interface EpochBase {
   current: number;
   startsAt: number;
-  endsAt: number;
+  earliestSettlementAt: number | null;
+  stallDeadlineAt: number;
   fetchedAt: number;
 }
 let epochCache: EpochBase | null = null;
 const EPOCH_CACHE_MS = 15_000;
 
+/**
+ * Epoch timing from the contract only (audit 6, H-3). The contract does not
+ * schedule epochs: one ends when the settler submits a settlement, no earlier
+ * than MIN_EPOCH_INTERVAL after the last. The previous version counted down
+ * to startsAt + 7 days, a browser constant, and then showed "Settling..."
+ * for as long as nobody settled.
+ */
 async function epochBase(): Promise<EpochBase> {
   const now = Date.now();
   if (epochCache && now - epochCache.fetchedAt < EPOCH_CACHE_MS) return epochCache;
 
-  const next = Number((await reader.profitShare.nextEpoch()) as bigint);
-  let startsAt = DEPLOYMENT.genesisMs;
-  if (next > 0) {
-    const prev = await reader.profitShare.getSettlement(next - 1);
-    const settledAt = Number(prev.settledAt as bigint);
-    if (settledAt > 0) startsAt = secToMs(settledAt);
-  }
-  epochCache = { current: next, startsAt, endsAt: startsAt + PROTOCOL.EPOCH_MS, fetchedAt: now };
+  const [next, last, deployed, minInterval, stall] = await Promise.all([
+    reader.profitShare.nextEpoch() as Promise<bigint>,
+    reader.profitShare.lastSettledAt() as Promise<bigint>,
+    reader.profitShare.deployedAt() as Promise<bigint>,
+    reader.profitShare.MIN_EPOCH_INTERVAL() as Promise<bigint>,
+    reader.profitShare.epochStallDeadline() as Promise<bigint>,
+  ]);
+  const lastSettled = Number(last);
+  epochCache = {
+    current: Number(next),
+    startsAt: secToMs(lastSettled > 0 ? lastSettled : Number(deployed)),
+    // Before the first settlement the contract accepts one at any time.
+    earliestSettlementAt: lastSettled > 0 ? secToMs(lastSettled + Number(minInterval)) : null,
+    // The contract's own value, so the 30-day and 90-day fuses are not restated here.
+    stallDeadlineAt: secToMs(stall),
+    fetchedAt: now,
+  };
   return epochCache;
 }
 
@@ -559,15 +576,13 @@ export const chainAdapter: IHcowAdapter = {
   // ---------------------------------------------------------- read
 
   async getEpoch(): Promise<Epoch> {
-    // Rule G. Cached; the countdown below is computed, not fetched.
+    // Rule G. Cached; any countdown is computed in the UI, not fetched.
     const base = await epochBase();
-    const snapshotInMs = base.endsAt - Date.now();
     return {
       current: base.current,
       startsAt: base.startsAt,
-      endsAt: base.endsAt,
-      snapshotInMs,
-      settling: snapshotInMs <= 0,
+      earliestSettlementAt: base.earliestSettlementAt,
+      stallDeadlineAt: base.stallDeadlineAt,
     };
   },
 
@@ -584,6 +599,8 @@ export const chainAdapter: IHcowAdapter = {
       operatingCostsUsdt: bigint;
       distributableProfitUsdt: bigint;
       participantsUsdt: bigint;
+      gameCompanyUsdt: bigint;
+      teamUsdt: bigint;
       hcowDeducted: bigint;
       snapshotBondedHcow: bigint;
       settledAt: bigint;
@@ -601,11 +618,14 @@ export const chainAdapter: IHcowAdapter = {
     const profit = toAmount(s.distributableProfitUsdt);
     const participants = toAmount(s.participantsUsdt);
 
-    // The contract splits the two 25% legs itself and rounds the remainder to
-    // the team leg, so recomputing here would disagree by dust. Derive the
-    // studio leg from the published bps and give the remainder to the other.
-    const studio = (profit * PROTOCOL.DISTRIBUTION.GAME_STUDIO_PCT) / 100;
-    const team = profit - participants - studio;
+    // Both legs as the contract recorded them. They used to be derived here as
+    // studio = profit x 25% and team = profit - participants - studio, which
+    // is wrong whenever participantsUsdt includes carry from an earlier epoch
+    // or is zero because nobody was eligible (audit 6, H-7): the testnet
+    // epoch 0 records participants 0, studio 175, team 175, and the old
+    // formula showed team 525.
+    const studio = toAmount(s.gameCompanyUsdt);
+    const team = toAmount(s.teamUsdt);
 
     const indexed = await settlementForEpoch(epoch);
     const txHash = (indexed?.[0]?.tx_hash ?? "") as Hex;

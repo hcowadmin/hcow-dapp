@@ -85,7 +85,9 @@ export function HomeScreen({ wallet, walletKey, canRead, pushToast, onNavigate, 
   useErrorToast(pub.error, pushToast);
   useErrorToast(pos.error, pushToast);
 
-  const { remainingMs } = useCountdown(pub.data ? pub.data.epoch.endsAt : null);
+  // Counts down to the earliest settlement the contract accepts, never to an
+  // invented end time. null (open now) renders a status, not "Settling…" (audit 6, H-3).
+  const { remainingMs } = useCountdown(pub.data ? pub.data.epoch.earliestSettlementAt : null);
   const countdown = fmtCountdown(remainingMs);
 
   const pool = pub.data ? pub.data.pool : null;
@@ -132,7 +134,8 @@ export function HomeScreen({ wallet, walletKey, canRead, pushToast, onNavigate, 
           </h1>
           <p style={{ margin: 0, maxWidth: 560, fontSize: 16, lineHeight: 1.6, color: T.tSec }}>
             HashCow distributes {PROTOCOL.DISTRIBUTION.PARTICIPANTS_PCT}% of distributable profit to bonded
-            participants every {PROTOCOL.EPOCH_DAYS} days, and publishes the whole waterfall that produced it.
+            participants at each settlement, at least {PROTOCOL.EPOCH_DAYS} days apart, and publishes the whole
+            waterfall that produced it.
             Bonded balances can be reduced. Staked HCOW is locked, and is not subject to deduction.
           </p>
           <div style={{ display: "flex", gap: 10, marginTop: 24, flexWrap: "wrap" }}>
@@ -153,13 +156,23 @@ export function HomeScreen({ wallet, walletKey, canRead, pushToast, onNavigate, 
             <div style={{ display: "grid", gap: 14 }}>
               <div>
                 <div style={{ ...MONO, fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: T.tSec }}>
-                  {countdown === null ? "Status" : "Snapshot in"}
+                  {countdown === null ? "Status" : "Earliest settlement in"}
                 </div>
                 <div style={{ ...MONO, fontSize: 30, fontWeight: 500, color: T.tPri, marginTop: 6 }}>
-                  {countdown ?? "Settling…"}
+                  {countdown ?? "Open for settlement"}
                 </div>
               </div>
-              <KV label="Snapshot at" value={fmtDate(pub.data.epoch.endsAt)} />
+              <KV label="Open since" value={fmtDate(pub.data.epoch.startsAt)} />
+              <KV
+                label="Earliest settlement"
+                value={pub.data.epoch.earliestSettlementAt === null ? "Any time" : fmtDate(pub.data.epoch.earliestSettlementAt)}
+                sub="Set by the contract. The epoch closes when the next settlement is submitted, no earlier than this."
+              />
+              <KV
+                label="Closable without payout after"
+                value={fmtDate(pub.data.epoch.stallDeadlineAt)}
+                sub="Set by the contract. If no settlement is submitted by then, anyone can close this epoch with no revenue and no payout."
+              />
               <KV
                 label="Network"
                 value={

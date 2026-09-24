@@ -40,7 +40,7 @@ export function fmtDate(ts: number): string {
   });
 }
 
-/** Countdown. Returns null when the deadline has passed, so callers show "Settling...". */
+/** Countdown. Returns null once the target time has passed; callers show a status instead. */
 export function fmtCountdown(ms: number): string | null {
   if (ms <= 0) return null;
   const s = Math.floor(ms / 1000);

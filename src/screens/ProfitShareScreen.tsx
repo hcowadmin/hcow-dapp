@@ -88,7 +88,8 @@ export function ProfitShareScreen({
   useErrorToast(pub.error, pushToast);
   useErrorToast(position.error, pushToast);
 
-  const { remainingMs } = useCountdown(pub.data ? pub.data.epoch.endsAt : null);
+  // Earliest settlement the contract accepts, not an end time (audit 6, H-3).
+  const { remainingMs } = useCountdown(pub.data ? pub.data.epoch.earliestSettlementAt : null);
   const countdown = fmtCountdown(remainingMs);
 
   const pool = pub.data ? pub.data.pool : null;
@@ -184,18 +185,22 @@ export function ProfitShareScreen({
           </h1>
           <p style={{ margin: 0, maxWidth: 560, fontSize: 15, lineHeight: 1.6, color: T.tSec }}>
             Bond HCOW to receive {PROTOCOL.REWARD_CURRENCY} from{" "}
-            {PROTOCOL.DISTRIBUTION.PARTICIPANTS_PCT}% of distributable profit, pro-rata to your bonded balance at
-            each {PROTOCOL.EPOCH_DAYS}-day snapshot. Distributable profit is what remains of game revenue after
-            direct costs and capped operating costs.
+            {PROTOCOL.DISTRIBUTION.PARTICIPANTS_PCT}% of distributable profit, pro-rata to your eligible bonded
+            balance at each settlement. Settlements are at least {PROTOCOL.EPOCH_DAYS} days apart. Distributable
+            profit is what remains of game revenue after direct costs and capped operating costs.
           </p>
         </div>
 
         <Card kicker="Epoch" title={pub.data ? `Epoch #${pub.data.epoch.current}` : "Epoch"} elevated>
           {pub.data ? (
             <>
-              <div style={{ ...MONO, fontSize: 28, fontWeight: 500, color: T.tPri }}>{countdown ?? "Settling…"}</div>
+              <div style={{ ...MONO, fontSize: 28, fontWeight: 500, color: T.tPri }}>{countdown ?? "Open for settlement"}</div>
               <p style={{ margin: "8px 0 0", fontSize: 12, color: T.tSec }}>
-                Snapshot {fmtDate(pub.data.epoch.endsAt)}
+                {countdown !== null && pub.data.epoch.earliestSettlementAt !== null
+                  ? `Earliest settlement ${fmtDate(pub.data.epoch.earliestSettlementAt)}.`
+                  : `Open since ${fmtDate(pub.data.epoch.startsAt)}.`}{" "}
+                The snapshot is taken when the settlement is submitted. If none is submitted by{" "}
+                {fmtDate(pub.data.epoch.stallDeadlineAt)}, anyone can close this epoch with no payout.
               </p>
             </>
           ) : (

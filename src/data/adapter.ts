@@ -59,6 +59,16 @@
  *     one, skipping that account's first-bond acknowledgement. Writes now
  *     refuse with ACCOUNT_CHANGED in that window, before anything is sent.
  *
+ * 17. v0.4.4 (audit 6, H-3): Epoch loses endsAt, snapshotInMs and settling.
+ *     They described a schedule the contract does not have: endsAt was
+ *     startsAt + 7 days computed in the browser, and once it passed the UI
+ *     said "Settling..." indefinitely while nothing happened on chain. The
+ *     epoch now carries only chain facts: startsAt (lastSettledAt, or
+ *     deployedAt before the first settlement) and earliestSettlementAt
+ *     (lastSettledAt + MIN_EPOCH_INTERVAL, read from the contract), plus
+ *     stallDeadlineAt (epochStallDeadline()), after which anyone may close the
+ *     epoch with no payout.
+ *
  * ---------------------------------------------------------------------------
  * DISTRIBUTION POLICY  v0.4   (read before implementing any money field)
  * ---------------------------------------------------------------------------
@@ -174,18 +184,30 @@ export interface WalletState {
 // EPOCH
 // ============================================================
 
+/**
+ * v0.4.4 (audit 6, H-3). HCOWProfitShare counts epochs but does not schedule
+ * them: an epoch ends when the settler submits a settlement, and the contract
+ * only enforces a minimum interval (MIN_EPOCH_INTERVAL) since the last one.
+ * There is no end time to count down to and nothing is "settling" on chain
+ * between settlements, so this type no longer claims either.
+ */
 export interface Epoch {
   current: number;
+  /** When this epoch opened: the last settlement's time, or the contract's deployment. Chain values. */
   startsAt: Timestamp;
-  /** Snapshot time. */
-  endsAt: Timestamp;
   /**
-   * Computed client-side as endsAt - now. May be <= 0 while settlement runs,
-   * in which case the UI shows "Settling..." rather than a zeroed countdown.
+   * Earliest time the contract accepts the next settlement
+   * (lastSettledAt + MIN_EPOCH_INTERVAL). null before the first settlement,
+   * when the contract accepts one at any time. A lower bound, never a
+   * deadline: the payout snapshot is taken when the settlement is submitted.
    */
-  snapshotInMs: number;
-  /** True between endsAt and the moment the settlement tx confirms. */
-  settling: boolean;
+  earliestSettlementAt: Timestamp | null;
+  /**
+   * From this time anyone may close the open epoch with every figure at zero
+   * (closeStalledEpoch): no revenue, no payout, no deduction. The contract's
+   * epochStallDeadline(). Shown so a missed settlement is visible in advance.
+   */
+  stallDeadlineAt: Timestamp;
 }
 
 /* EpochSettlement removed in v0.4. Superseded by EpochDistribution, which

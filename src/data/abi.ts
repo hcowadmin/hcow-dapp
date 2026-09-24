@@ -34,6 +34,11 @@ export const PROFIT_SHARE_ABI = [
   "function participantCount() view returns (uint256)",
   "function accDeductedPerShare() view returns (uint256)",
   "function nextEpoch() view returns (uint64)",
+  // epoch timing (audit 6, H-3). The contract schedules nothing; these are the facts it has.
+  "function lastSettledAt() view returns (uint64)",
+  "function deployedAt() view returns (uint64)",
+  "function MIN_EPOCH_INTERVAL() view returns (uint256)",
+  "function epochStallDeadline() view returns (uint64)",
   "function gameCompany() view returns (address)",
   "function team() view returns (address)",
   // account state
@@ -42,7 +47,12 @@ export const PROFIT_SHARE_ABI = [
   "function accountOf(address) view returns (uint256 bondedHcow, uint256 shares, uint256 pendingUnbond, uint64 unbondReadyAt)",
   "function lifetimeOf(address) view returns (uint256 deductedHcow, uint256 claimedUsdt)",
   // settlements
-  "function getSettlement(uint64 epoch) view returns (tuple(uint128 grossReceivedUsdt, uint128 directCostsUsdt, uint128 operatingCostsUsdt, uint128 distributableProfitUsdt, uint128 participantsUsdt, uint128 hcowDeducted, uint128 snapshotBondedHcow, uint64 settledAt))",
+  // Must match HCOWProfitShare.Settlement field for field. It used to omit
+  // gameCompanyUsdt and teamUsdt, so every field after participantsUsdt was
+  // read two words early: settledAt decoded as hcowDeducted (0 on the
+  // testnet), every settled epoch looked unsettled, and the app said
+  // "Nothing has been distributed so far" (audit 6 follow-up, 2026-09-24).
+  "function getSettlement(uint64 epoch) view returns (tuple(uint128 grossReceivedUsdt, uint128 directCostsUsdt, uint128 operatingCostsUsdt, uint128 distributableProfitUsdt, uint128 participantsUsdt, uint128 gameCompanyUsdt, uint128 teamUsdt, uint128 hcowDeducted, uint128 snapshotBondedHcow, uint64 settledAt))",
   // writes
   "function bond(uint256 hcowAmount)",
   "function requestUnbond(uint256 hcowAmount)",
@@ -96,7 +106,8 @@ export const STAKING_ABI = [
 export const FAUCET_ABI = [
   "function claim()",
   "function claimableAt(address) view returns (uint64)",
-  "function status(address) view returns (uint256 hcowPerClaim, uint256 usdtPerClaim, uint256 hcowRemaining, uint256 usdtRemaining, uint64 readyAt, uint256 claimsLeft)",
+  // Full output list as deployed. The adapter reads the first six by position.
+  "function status(address) view returns (uint256 hcowPerClaim, uint256 usdtPerClaim, uint256 hcowRemaining, uint256 usdtRemaining, uint64 readyAt, uint256 claimsLeft, uint256 windowClaimsLeft, uint64 windowResetsAt, uint256 hcowNow, uint256 usdtNow)",
   "error CooldownActive(uint64 readyAt)",
   "error FaucetEmpty(address token, uint256 requested, uint256 available)",
 ] as const;

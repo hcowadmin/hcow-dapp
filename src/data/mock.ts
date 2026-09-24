@@ -149,7 +149,7 @@ function buildDistribution(epoch: number, settledAt: number): EpochDistribution 
 
 const store: Store = {
   wallet: { ...DISCONNECTED },
-  epoch: { current: 27, startsAt: epochEnds - PROTOCOL.EPOCH_MS, endsAt: epochEnds, snapshotInMs: 0, settling: false },
+  epoch: { current: 27, startsAt: epochEnds - PROTOCOL.EPOCH_MS, earliestSettlementAt: epochEnds, stallDeadlineAt: epochEnds - PROTOCOL.EPOCH_MS + 30 * 86_400_000 },
   pool: {
     totalBondedHcow: 4_280_000,
     participants: 1247,
@@ -325,8 +325,7 @@ export const mockAdapter: IHcowAdapter = {
 
   // ---- READ ----
   async getEpoch() {
-    const remaining = store.epoch.endsAt - Date.now();
-    return { ...store.epoch, snapshotInMs: remaining, settling: remaining <= 0 };
+    return { ...store.epoch };
   },
 
   async getLastEpochDistribution() {

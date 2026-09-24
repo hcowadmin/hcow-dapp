@@ -77,8 +77,25 @@ export const eventsForAccount = (address: string, limit = 100) =>
       `&order=block_number.desc,log_index.desc&limit=${limit}`
   );
 
+export interface SettlementTxRow {
+  tx_hash: string;
+}
+
+/**
+ * The transaction that closed `epoch` on the configured HCOWProfitShare.
+ * Filtered by contract: the epoch_settlements view has no contract column,
+ * and chain 97 also holds the retired August deployment, whose epoch 0 row
+ * would otherwise be linked from the current contract's epoch 0 (audit 6
+ * follow-up, 2026-09-24). Includes StalledEpochClosed, which also ends an
+ * epoch. ilike without wildcards is a case-insensitive equality.
+ */
 export const settlementForEpoch = (epoch: number) =>
-  query<SettlementRow>(`epoch_settlements?epoch=eq.${epoch}&limit=1`);
+  query<SettlementTxRow>(
+    `chain_events?select=tx_hash&chain_id=eq.${DEPLOYMENT.chainId}` +
+      `&event=in.(EpochSettled,StalledEpochClosed)` +
+      `&contract=ilike.${DEPLOYMENT.addresses.profitShare}` +
+      `&epoch=eq.${epoch}&order=block_number.desc&limit=1`
+  );
 
 export const revenueWindows = () =>
   query<WindowRow>(`revenue_windows?chain_id=eq.${DEPLOYMENT.chainId}&limit=1`);

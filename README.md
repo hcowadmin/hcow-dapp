@@ -167,7 +167,9 @@ well as in `chain.ts`.
    balance change.** The UI does not poll. Without this the app will show one
    account's balance while signing as another.
 7. **`getEpoch` is cached per epoch.** It is read on mount; the countdown ticks
-   locally and costs no RPC.
+   locally and costs no RPC. It counts down only to the earliest settlement the
+   contract accepts (`lastSettledAt + MIN_EPOCH_INTERVAL`). The contract does
+   not schedule epochs, so the app never shows an end time or "Settling…".
 8. **Cooldown `readyAt` comes from chain state**, never `Date.now() + 7 days`.
 
 ---

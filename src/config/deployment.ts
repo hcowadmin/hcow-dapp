@@ -50,16 +50,8 @@ export const DEPLOYMENT = {
     faucet: pick("VITE_FAUCET_ADDRESS", "0xbfEfa53d4800A6Ed2026cb7b34d182A71cb0684b"),
   },
 
-  /**
-   * Epoch 0 start, unix ms. HCOWProfitShare counts epochs but does not
-   * schedule them: an epoch begins when the previous one is settled. Before
-   * the first settlement there is nothing on chain to count from, so the
-   * countdown needs this anchor. Set it to the deployment time.
-   *
-   * After the first settlement this value is no longer used. The countdown
-   * runs from the last settlement's on-chain settledAt.
-   */
-  genesisMs: Number(pick("VITE_GENESIS_MS", "1788353450000")),
+  // genesisMs (VITE_GENESIS_MS) removed with audit 6, H-3: the epoch start is
+  // read from the contract (deployedAt, then lastSettledAt), not configured.
 
   /**
    * Event index. Supabase project URL and its anon key, which is a public

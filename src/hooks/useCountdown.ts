@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 
 /**
- * Local 1s tick for the epoch countdown.
+ * Local 1s tick for a countdown to a chain-provided time (the earliest epoch
+ * settlement, an unbond cooldown). The caller decides what "passed" means.
  * This does NOT call the adapter. The epoch object is fetched once and the
  * remaining time is computed on the client, so the countdown costs no RPC.
  */

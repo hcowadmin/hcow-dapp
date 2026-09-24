@@ -206,9 +206,14 @@ export function EpochWaterfall({ distribution: d }: EpochWaterfallProps) {
           <Badge tone="info">Epoch #{d.epoch}</Badge>
           <span style={{ fontSize: 12, color: T.tSec }}>Settled {fmtDate(d.settledAt)}</span>
         </div>
-        <ExtLink href={txUrl(d.txHash)} ariaLabel={`Settlement transaction ${d.txHash} on BscScan`}>
-          Settlement tx {shortHash(d.txHash, 6, 4)}
-        </ExtLink>
+        {/* No link without a hash: txUrl("") is the explorer's bare /tx/ page (audit 6, M-6). */}
+        {/^0x[0-9a-fA-F]{64}$/.test(d.txHash) ? (
+          <ExtLink href={txUrl(d.txHash)} ariaLabel={`Settlement transaction ${d.txHash} on BscScan`}>
+            Settlement tx {shortHash(d.txHash, 6, 4)}
+          </ExtLink>
+        ) : (
+          <span style={{ fontSize: 12, color: T.tSec }}>Settlement tx not indexed yet</span>
+        )}
       </div>
 
       {/* ---- chain verifiable indicator ---- */}
@@ -333,7 +338,11 @@ export function EpochWaterfall({ distribution: d }: EpochWaterfallProps) {
           pct={PROTOCOL.DISTRIBUTION.PARTICIPANTS_PCT}
           value={d.participantsUsdt}
           tone="ok"
-          note="Paid pro-rata to bonded balance at the epoch snapshot."
+          note={
+            d.distributableProfitUsdt > 0
+              ? `As recorded by the contract, split over eligible bonded shares. Amounts can be carried between settlements, so this can differ from ${PROTOCOL.DISTRIBUTION.PARTICIPANTS_PCT}% of this epoch's profit.`
+              : "No distributable profit this epoch, so nothing was allocated to participants."
+          }
         />
         <Split
           label="Game studio"
@@ -366,7 +375,7 @@ export function EpochWaterfall({ distribution: d }: EpochWaterfallProps) {
         <Row
           label="Bonded pool at snapshot"
           value={fmtHcow(d.snapshotBondedHcow)}
-          note="The denominator for every participant share this epoch."
+          note="Total bonded HCOW when the settlement was recorded. Payouts are split over eligible shares, which can be fewer."
         />
       </div>
     </div>

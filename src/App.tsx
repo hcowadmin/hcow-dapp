@@ -289,7 +289,7 @@ export default function App() {
           }}
         >
           <span>
-            HashCow · {PROTOCOL.CHAIN_NAME} · Epoch length {PROTOCOL.EPOCH_DAYS} days
+            HashCow · {PROTOCOL.CHAIN_NAME} · Settlements at least {PROTOCOL.EPOCH_DAYS} days apart
           </span>
           <span style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
             <a href={EXTERNAL_LINKS.HOMEPAGE} target="_blank" rel="noreferrer noopener" style={{ color: T.tSec, textDecoration: "none" }}>
