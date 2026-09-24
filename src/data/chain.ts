@@ -436,6 +436,52 @@ async function epochBase(): Promise<EpochBase> {
   return epochCache;
 }
 
+/**
+ * 24h / 7d / 30d windows summed from getSettlement records, newest first.
+ *
+ * These used to come from the event index (revenue_windows). On 2026-09-24 the
+ * index had not recorded a single event of the current contracts, and the
+ * public BSC testnet nodes no longer serve eth_getLogs for September blocks
+ * (pruned, or refused outright), so it could not be backfilled. The windows
+ * were showing a "measured" 0 over a 1,000 USDT settlement. The contract holds
+ * every settlement anyway, and settlements are at least MIN_EPOCH_INTERVAL
+ * (7 days) apart, a stall close at least 30 days, so a 30-day window holds at
+ * most five of them: a handful of reads, no index.
+ *
+ * null when any read fails, or when more records than that fall inside the
+ * window (the spacing assumption would be broken): not measured, never a
+ * partial sum. Window test matches the old view: age strictly under the span.
+ */
+async function settlementWindows(): Promise<{
+  gross24h: number; gross7d: number; gross30d: number; participants30d: number;
+} | null> {
+  const DAY = 86_400_000;
+  const MAX_IN_30D = 5;
+  try {
+    const next = Number((await reader.profitShare.nextEpoch()) as bigint);
+    const now = Date.now();
+    let gross24h = 0, gross7d = 0, gross30d = 0, participants30d = 0, inside = 0;
+    for (let e = next - 1; e >= 0; e--) {
+      const s = (await reader.profitShare.getSettlement(e)) as {
+        grossReceivedUsdt: bigint; participantsUsdt: bigint; settledAt: bigint;
+      };
+      const at = secToMs(s.settledAt);
+      // A record with no time, or one older than 30 days: nothing older can be inside either.
+      if (at === 0 || now - at >= 30 * DAY) break;
+      if (++inside > MAX_IN_30D) return null;
+      const age = Math.max(0, now - at);   // a record slightly "ahead" of this clock is brand new
+      const gross = toAmount(s.grossReceivedUsdt);
+      gross30d += gross;
+      participants30d += toAmount(s.participantsUsdt);
+      if (age < 7 * DAY) gross7d += gross;
+      if (age < DAY) gross24h += gross;
+    }
+    return { gross24h, gross7d, gross30d, participants30d };
+  } catch {
+    return null;
+  }
+}
+
 // ============================================================
 // THE ADAPTER
 // ============================================================
@@ -671,12 +717,11 @@ export const chainAdapter: IHcowAdapter = {
   async getPoolStats(): Promise<PoolStats> {
     // totalUsdtDistributed() is no longer read here: it is a lifetime figure
     // and the only field it fed is labelled 30d (adapter v0.4.2).
-    const [totalBonded, participants, windows] = await Promise.all([
+    const [totalBonded, participants, w] = await Promise.all([
       reader.profitShare.totalBondedHcow() as Promise<bigint>,
       reader.profitShare.participantCount() as Promise<bigint>,
-      revenueWindows(),
+      settlementWindows(),
     ]);
-    const w = windows?.[0] ?? null;
 
     return {
       totalBondedHcow: toAmount(totalBonded),
@@ -686,17 +731,14 @@ export const chainAdapter: IHcowAdapter = {
       // Null by policy until the APR methodology is confirmed. The UI renders
       // a dash. Do not replace this with a computed guess.
       estimatedAprPct: null,
-      // Rolling windows over EpochSettled. Receipt basis: an epoch's gross
-      // lands in the window its settlement did, which is the same basis the
-      // policy uses. null when the index is unavailable (adapter v0.4.2): it
-      // used to be 0, which read as "nothing was received".
-      grossReceivedUsdtToday: w ? toAmount(BigInt(w.gross_24h)) : null,
-      grossReceivedUsdt7d: w ? toAmount(BigInt(w.gross_7d)) : null,
-      grossReceivedUsdt30d: w ? toAmount(BigInt(w.gross_30d)) : null,
-      // null without the index. It used to fall back to the lifetime total
-      // from the contract under a "30d" label, which could show more paid out
-      // than received next to a zero gross.
-      distributedToParticipantsUsdt30d: w ? toAmount(BigInt(w.participants_30d)) : null,
+      // Rolling windows over the contract's own settlement records (see
+      // settlementWindows). Receipt basis: an epoch's gross lands in the
+      // window its settlement did, the same basis the policy uses. null only
+      // when those reads fail: never 0 for "unknown", never the lifetime total.
+      grossReceivedUsdtToday: w ? w.gross24h : null,
+      grossReceivedUsdt7d: w ? w.gross7d : null,
+      grossReceivedUsdt30d: w ? w.gross30d : null,
+      distributedToParticipantsUsdt30d: w ? w.participants30d : null,
       // Indexer gaps (CHAIN_ADAPTER_GAPS.needsIndexer). null is "not measured",
       // not "nothing arrived": [] here made the Profit Share screen say "No
       // money has been received into the vault in the last 30 days" on every

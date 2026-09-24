@@ -348,16 +348,17 @@ export interface PoolStats {
    */
   estimatedAprPct: Percent | null;
   /**
-   * Gross received. Rolling 24h, not calendar day. The rolling windows need
-   * the event index: null when it is not configured or cannot be read
-   * (v0.4.2). 0 means measured, and nothing arrived.
+   * Gross received. Rolling 24h, not calendar day. Summed from the
+   * contract's settlement records (2026-09-24; previously the event index).
+   * null when those reads fail (v0.4.2). 0 means measured, and nothing arrived.
    */
   grossReceivedUsdtToday: Amount | null;
   grossReceivedUsdt7d: Amount | null;
   grossReceivedUsdt30d: Amount | null;
   /**
-   * Actually paid to participants over the last 30 days. null without the
-   * index (v0.4.2). Never substitute the lifetime total under this label.
+   * Allocated to participants by settlements in the last 30 days, from the
+   * contract's settlement records. null when those reads fail (v0.4.2).
+   * Never substitute the lifetime total under this label.
    */
   distributedToParticipantsUsdt30d: Amount | null;
   /**

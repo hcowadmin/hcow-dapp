@@ -59,13 +59,14 @@ the list to work through, in this order:
 3. `epoch_settlement` rows in transaction history, which need the indexer to
    replay each account's share history to attribute a settlement per user.
 
-Transaction history, the rolling gross-received and burn windows, and the
-settlement transaction hash now come from the event index. Set
+Transaction history, the burn windows and the settlement transaction hash
+come from the event index. Set
 `VITE_INDEXER_URL` and `VITE_INDEXER_KEY` to the Supabase project URL and its
-anon key. Leave them empty and the app still works. The gross-received
-windows and transaction history then report null, shown as "Measurement
-pending" and "History unavailable", rather than zero. The burn windows do not
-yet (see above), and the settlement transaction link is rendered without a hash.
+anon key. Leave them empty and the app still works: transaction history then
+reports null, shown as "History unavailable", and the settlement transaction
+link is left out. The gross-received and paid-to-participants windows do not
+use the index: they are summed from the contract's own settlement records. The
+burn windows still do (see above).
 
 The contract side is closed. `participantCount` and `lifetimeOf(account)` were
 added to `HCOWProfitShare` for exactly these fields, so participant count,
