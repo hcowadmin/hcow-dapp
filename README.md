@@ -43,7 +43,12 @@ To go back to mock data, swap the two lines in `src/data/index.ts`.
 
 Every method the stub file marked `[C]` is implemented against a real contract.
 The `[I]` indexer methods and `[B]` backend methods have nothing behind them
-yet, so they return zero, null or an empty list rather than an invented number.
+yet, so they return null rather than an invented number. null means "not
+measured": the UI shows a dash and "Measurement pending" (or "Forecast pending",
+or "Line items pending"), never 0 and never "nothing arrived". 0 and an empty
+list keep their plain meaning: measured, and nothing there. Not converted yet:
+without the index, the burn panel still shows 0 for today and the lifetime
+deduction total under its 30-day label.
 Each one is named in the `CHAIN_ADAPTER_GAPS` export in `chain.ts`, which is
 the list to work through, in this order:
 
@@ -57,8 +62,10 @@ the list to work through, in this order:
 Transaction history, the rolling gross-received and burn windows, and the
 settlement transaction hash now come from the event index. Set
 `VITE_INDEXER_URL` and `VITE_INDEXER_KEY` to the Supabase project URL and its
-anon key. Leave them empty and the app still works: those fields report empty
-rather than guessing, exactly as before the index existed.
+anon key. Leave them empty and the app still works. The gross-received
+windows and transaction history then report null, shown as "Measurement
+pending" and "History unavailable", rather than zero. The burn windows do not
+yet (see above), and the settlement transaction link is rendered without a hash.
 
 The contract side is closed. `participantCount` and `lifetimeOf(account)` were
 added to `HCOWProfitShare` for exactly these fields, so participant count,

@@ -261,10 +261,16 @@ export default function App() {
         tabIndex={0}
         style={{ maxWidth: MAX_WIDTH, margin: "0 auto", padding: "28px 24px 96px" }}
       >
-        {route === "home" ? <HomeScreen {...screenProps} /> : null}
-        {route === "profit" ? <ProfitShareScreen {...screenProps} /> : null}
-        {route === "staking" ? <NetworkStakingScreen {...screenProps} /> : null}
-        {route === "portfolio" ? <PortfolioScreen {...screenProps} /> : null}
+        {/* key={walletKey}: no screen state survives an account or chain change.
+            An open modal, a typed amount and a ticked risk box all belonged to
+            the previous account. Without the key a Top up modal opened for an
+            account that had bonded before stayed open after switching to one
+            that never had, and bonded for it with no risk acknowledgement
+            (audit 6, H-1). */}
+        {route === "home" ? <HomeScreen key={walletKey} {...screenProps} /> : null}
+        {route === "profit" ? <ProfitShareScreen key={walletKey} {...screenProps} /> : null}
+        {route === "staking" ? <NetworkStakingScreen key={walletKey} {...screenProps} /> : null}
+        {route === "portfolio" ? <PortfolioScreen key={walletKey} {...screenProps} /> : null}
       </main>
 
       {/* ---------------- footer ---------------- */}

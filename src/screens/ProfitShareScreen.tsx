@@ -36,6 +36,7 @@ import {
   LoadingBlock,
   Metric,
   MONO,
+  NotMeasured,
   SectionLabel,
   Skeleton,
 } from "../components/ui";
@@ -138,7 +139,14 @@ export function ProfitShareScreen({
   const amountReady = !amountEmpty && !amountInvalid;
 
   const firstBond = pos ? pos.status === "first_time" || pos.bondedAmount === 0 : true;
-  const needsAck = modal === "bond" && firstBond;
+  // Decided by the position, not by which button opened the modal. A modal
+  // opened as "topup" must still ask when the position says first bond
+  // (audit 6, H-1). The key on this screen in App.tsx is the primary guard;
+  // this one holds even if the screen is ever rendered without it.
+  const needsAck = isDeposit && firstBond;
+  // Never confirm a deposit against a position that is still loading or
+  // being refetched: the acknowledgement decision above would be stale.
+  const positionSettled = !!pos && !position.loading;
 
   function amountHint(): string {
     if (amountInvalid && parsed > maxForModal) {
@@ -208,14 +216,14 @@ export function ProfitShareScreen({
           />
           <Metric
             label="Gross received · 30d"
-            value={pool ? fmtAmount(pool.grossReceivedUsdt30d) : <Skeleton width={120} height={24} />}
-            unit={pool ? PROTOCOL.REWARD_CURRENCY : undefined}
+            value={pool ? (pool.grossReceivedUsdt30d === null ? <NotMeasured /> : fmtAmount(pool.grossReceivedUsdt30d)) : <Skeleton width={120} height={24} />}
+            unit={pool && pool.grossReceivedUsdt30d !== null ? PROTOCOL.REWARD_CURRENCY : undefined}
             hint="Receipt basis. Store payouts land one to two months late."
           />
           <Metric
             label="Paid to participants · 30d"
-            value={pool ? fmtAmount(pool.distributedToParticipantsUsdt30d) : <Skeleton width={120} height={24} />}
-            unit={pool ? PROTOCOL.REWARD_CURRENCY : undefined}
+            value={pool ? (pool.distributedToParticipantsUsdt30d === null ? <NotMeasured /> : fmtAmount(pool.distributedToParticipantsUsdt30d)) : <Skeleton width={120} height={24} />}
+            unit={pool && pool.distributedToParticipantsUsdt30d !== null ? PROTOCOL.REWARD_CURRENCY : undefined}
             tone="ok"
           />
           <Metric label="Estimated APR" value={pool ? <Apr pct={pool.estimatedAprPct} /> : <Skeleton width={90} height={24} />} />
@@ -224,10 +232,19 @@ export function ProfitShareScreen({
         <div style={{ marginTop: 16 }}>
           <Card
             kicker="Where the money came from · last 30 days"
-            title={pool ? `${fmtRatioPct(pool.chainVerifiableRatio30d, 1)} chain verifiable` : "Revenue by origin"}
+            title={
+              pool && pool.chainVerifiableRatio30d !== null
+                ? `${fmtRatioPct(pool.chainVerifiableRatio30d, 1)} chain verifiable`
+                : "Revenue by origin"
+            }
           >
             {pool ? (
-              pool.revenue30dByOrigin.length === 0 ? (
+              pool.revenue30dByOrigin === null ? (
+                <EmptyState
+                  title="Measurement pending"
+                  body="The breakdown by origin is not measured yet. This is not a statement that nothing was received."
+                />
+              ) : pool.revenue30dByOrigin.length === 0 ? (
                 <EmptyState title="No revenue recorded" body="No money has been received into the vault in the last 30 days." />
               ) : (
                 <div>
@@ -307,7 +324,13 @@ export function ProfitShareScreen({
                 <KV label="Share of pool" value={fmtRatioPct(pos.shareOfPool)} sub="At the last snapshot." />
                 <KV
                   label="Forecast for this epoch"
-                  value={fmtUsdt(pos.estimatedEpochUsdt)}
+                  value={
+                    pos.estimatedEpochUsdt === null ? (
+                      <NotMeasured size="sm" label="Forecast pending" />
+                    ) : (
+                      fmtUsdt(pos.estimatedEpochUsdt)
+                    )
+                  }
                   sub="Forecast for the in-flight epoch. Not a promise."
                 />
                 <KV label="Deducted to date" value={fmtHcow(pos.lifetimeDeductedHcow)} tone="warn" />
@@ -380,7 +403,7 @@ export function ProfitShareScreen({
             </Button>
             <Button
               variant="primary"
-              disabled={busy || !amountReady || (needsAck && !ack)}
+              disabled={busy || !positionSettled || !amountReady || (needsAck && !ack)}
               onClick={() =>
                 void submit(
                   () => (modal === "topup" ? adapter.topUpBond(parsed) : adapter.bond(parsed)),

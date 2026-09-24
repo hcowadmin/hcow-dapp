@@ -1,0 +1,732 @@
+diff --git a/README.md b/README.md
+index 412646d..b8b687c 100644
+--- a/README.md
++++ b/README.md
+@@ -43,7 +43,12 @@ To go back to mock data, swap the two lines in `src/data/index.ts`.
+ 
+ Every method the stub file marked `[C]` is implemented against a real contract.
+ The `[I]` indexer methods and `[B]` backend methods have nothing behind them
+-yet, so they return zero, null or an empty list rather than an invented number.
++yet, so they return null rather than an invented number. null means "not
++measured": the UI shows a dash and "Measurement pending" (or "Forecast pending",
++or "Line items pending"), never 0 and never "nothing arrived". 0 and an empty
++list keep their plain meaning: measured, and nothing there. Not converted yet:
++without the index, the burn panel still shows 0 for today and the lifetime
++deduction total under its 30-day label.
+ Each one is named in the `CHAIN_ADAPTER_GAPS` export in `chain.ts`, which is
+ the list to work through, in this order:
+ 
+@@ -57,8 +62,10 @@ the list to work through, in this order:
+ Transaction history, the rolling gross-received and burn windows, and the
+ settlement transaction hash now come from the event index. Set
+ `VITE_INDEXER_URL` and `VITE_INDEXER_KEY` to the Supabase project URL and its
+-anon key. Leave them empty and the app still works: those fields report empty
+-rather than guessing, exactly as before the index existed.
++anon key. Leave them empty and the app still works. The gross-received
++windows and transaction history then report null, shown as "Measurement
++pending" and "History unavailable", rather than zero. The burn windows do not
++yet (see above), and the settlement transaction link is rendered without a hash.
+ 
+ The contract side is closed. `participantCount` and `lifetimeOf(account)` were
+ added to `HCOWProfitShare` for exactly these fields, so participant count,
+diff --git a/src/App.tsx b/src/App.tsx
+index 5e12f1d..14f4dee 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -261,10 +261,16 @@ export default function App() {
+         tabIndex={0}
+         style={{ maxWidth: MAX_WIDTH, margin: "0 auto", padding: "28px 24px 96px" }}
+       >
+-        {route === "home" ? <HomeScreen {...screenProps} /> : null}
+-        {route === "profit" ? <ProfitShareScreen {...screenProps} /> : null}
+-        {route === "staking" ? <NetworkStakingScreen {...screenProps} /> : null}
+-        {route === "portfolio" ? <PortfolioScreen {...screenProps} /> : null}
++        {/* key={walletKey}: no screen state survives an account or chain change.
++            An open modal, a typed amount and a ticked risk box all belonged to
++            the previous account. Without the key a Top up modal opened for an
++            account that had bonded before stayed open after switching to one
++            that never had, and bonded for it with no risk acknowledgement
++            (audit 6, H-1). */}
++        {route === "home" ? <HomeScreen key={walletKey} {...screenProps} /> : null}
++        {route === "profit" ? <ProfitShareScreen key={walletKey} {...screenProps} /> : null}
++        {route === "staking" ? <NetworkStakingScreen key={walletKey} {...screenProps} /> : null}
++        {route === "portfolio" ? <PortfolioScreen key={walletKey} {...screenProps} /> : null}
+       </main>
+ 
+       {/* ---------------- footer ---------------- */}
+diff --git a/src/components/EpochWaterfall.tsx b/src/components/EpochWaterfall.tsx
+index f7d5dd9..7b8237a 100644
+--- a/src/components/EpochWaterfall.tsx
++++ b/src/components/EpochWaterfall.tsx
+@@ -16,7 +16,7 @@ import { T } from "../config/tokens";
+ import { PROTOCOL, txUrl } from "../config/constants";
+ import type { CostCategory, CostLine, EpochDistribution, RevenueLine, RevenueOrigin } from "../data";
+ import { fmtDate, fmtHcow, fmtRatioPct, fmtUsdt, shortHash } from "../lib/format";
+-import { Badge, Divider, ExtLink, MONO, ProgressBar, toneColors } from "./ui";
++import { Badge, Divider, ExtLink, MONO, NotMeasured, ProgressBar, toneColors } from "./ui";
+ 
+ /**
+  * Display names for revenue origins. The remaining off-chain table-game origin
+@@ -185,8 +185,9 @@ export interface EpochWaterfallProps {
+ }
+ 
+ export function EpochWaterfall({ distribution: d }: EpochWaterfallProps) {
+-  const directLines = d.costs.filter((c) => c.isDirect);
+-  const opexLines = d.costs.filter((c) => !c.isDirect);
++  // null: line items not published yet (adapter v0.4.2). Only [] means none.
++  const directLines = d.costs === null ? null : d.costs.filter((c) => c.isDirect);
++  const opexLines = d.costs === null ? null : d.costs.filter((c) => !c.isDirect);
+ 
+   return (
+     <div>
+@@ -231,12 +232,18 @@ export function EpochWaterfall({ distribution: d }: EpochWaterfallProps) {
+           }}
+         >
+           <span style={{ fontSize: 13, fontWeight: 600, color: T.tPri }}>Chain verifiable share of gross</span>
+-          <span style={{ ...MONO, fontSize: 16, color: T.okFg }}>{fmtRatioPct(d.chainVerifiableRatio, 1)}</span>
++          {d.chainVerifiableRatio === null ? (
++            <NotMeasured size="sm" />
++          ) : (
++            <span style={{ ...MONO, fontSize: 16, color: T.okFg }}>{fmtRatioPct(d.chainVerifiableRatio, 1)}</span>
++          )}
+         </div>
+-        <ProgressBar
+-          ratio={d.chainVerifiableRatio}
+-          label={`Chain verifiable share of gross received in epoch ${d.epoch}`}
+-        />
++        {d.chainVerifiableRatio === null ? null : (
++          <ProgressBar
++            ratio={d.chainVerifiableRatio}
++            label={`Chain verifiable share of gross received in epoch ${d.epoch}`}
++          />
++        )}
+         <p style={{ margin: "10px 0 0", fontSize: 12, color: T.tSec, lineHeight: 1.55 }}>
+           Chain verified money is HCOW spent in game and settled on {PROTOCOL.CHAIN_NAME}. The remainder arrives
+           off chain and is attested by a published payout statement paired with the on-chain deposit that carried
+@@ -248,9 +255,11 @@ export function EpochWaterfall({ distribution: d }: EpochWaterfallProps) {
+       <div style={{ ...MONO, fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: T.tSec, marginBottom: 6 }}>
+         Money received
+       </div>
+-      {d.revenue.map((line) => (
+-        <RevenueLineRow key={`${line.origin}-${line.cls}`} line={line} />
+-      ))}
++      {d.revenue === null ? (
++        <Row label="Line items pending" value="—" indent />
++      ) : (
++        d.revenue.map((line) => <RevenueLineRow key={`${line.origin}-${line.cls}`} line={line} />)
++      )}
+       <Row label="Gross received" value={fmtUsdt(d.grossReceivedUsdt)} strong />
+ 
+       <Divider space={12} />
+@@ -258,7 +267,9 @@ export function EpochWaterfall({ distribution: d }: EpochWaterfallProps) {
+       <div style={{ ...MONO, fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: T.tSec, marginBottom: 6 }}>
+         Direct costs · not subject to the cap
+       </div>
+-      {directLines.length === 0 ? (
++      {directLines === null ? (
++        <Row label="Line items pending" value="—" indent />
++      ) : directLines.length === 0 ? (
+         <Row label="No direct costs recorded" value={fmtUsdt(0)} indent />
+       ) : (
+         directLines.map((line) => <CostRow key={line.category} line={line} />)
+@@ -271,7 +282,9 @@ export function EpochWaterfall({ distribution: d }: EpochWaterfallProps) {
+       <div style={{ ...MONO, fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: T.tSec, marginBottom: 6 }}>
+         Operating costs · capped at {PROTOCOL.OPEX_CAP_PCT}% of net revenue
+       </div>
+-      {opexLines.length === 0 ? (
++      {opexLines === null ? (
++        <Row label="Line items pending" value="—" indent />
++      ) : opexLines.length === 0 ? (
+         <Row label="No operating costs recorded" value={fmtUsdt(0)} indent />
+       ) : (
+         opexLines.map((line) => <CostRow key={line.category} line={line} />)
+diff --git a/src/components/ui.tsx b/src/components/ui.tsx
+index 98ed979..2c23440 100644
+--- a/src/components/ui.tsx
++++ b/src/components/ui.tsx
+@@ -567,6 +567,25 @@ export function AddressChip({ address, label }: AddressChipProps) {
+   );
+ }
+ 
++/* ============================================================
++   NOT MEASURED
++   ============================================================
++   For adapter fields that are null because their data source does not
++   exist yet (adapter v0.4.1). A dash and "Measurement pending", like the
++   APR below. An unmeasured value is never rendered as 0 or as an empty
++   result: in this product a 0% "chain verifiable" or "nothing received"
++   reads as a statement of fact (audit 6, C-1 and C-2). */
++
++export function NotMeasured({ size = "lg", label = "Measurement pending" }: { size?: "lg" | "sm"; label?: string }) {
++  const big = size === "lg";
++  return (
++    <span style={{ display: "inline-flex", flexDirection: "column", gap: 4 }}>
++      <span style={{ ...MONO, fontSize: big ? 26 : 14, color: T.tSec }}>—</span>
++      <span style={{ fontSize: 11, color: T.tSec }}>{label}</span>
++    </span>
++  );
++}
++
+ /* ============================================================
+    APR
+    ============================================================
+diff --git a/src/data/adapter.ts b/src/data/adapter.ts
+index bcf82d0..761357d 100644
+--- a/src/data/adapter.ts
++++ b/src/data/adapter.ts
+@@ -31,6 +31,33 @@
+  *     Profit Share. The full epoch waterfall is published via
+  *     EpochDistribution. The opex cap, the closed cost list, and the
+  *     no-distribution-no-deduction rule are now part of the contract.
++ * 14. v0.4.1 (audit 6, C-1 and C-2): three fields can now say "not measured".
++ *     EpochDistribution.chainVerifiableRatio, PoolStats.chainVerifiableRatio30d
++ *     and PoolStats.revenue30dByOrigin are nullable. null means the data source
++ *     does not exist yet (the revenue index); it is NOT zero and must never be
++ *     rendered as 0% or as "nothing was received". An empty revenue30dByOrigin
++ *     array still means "measured, and nothing arrived". Same pattern as
++ *     estimatedAprPct. The interface could not express "unknown" before, so the
++ *     chain adapter reported 0 and [] and the UI turned those into statements
++ *     of fact. This edit is the interface owner's decision of 2026-09-22.
++ *
++ * 15. v0.4.2 (audit 6, M-5, L-8, L-16 and the 30d fallbacks): the same rule
++ *     for the remaining gaps. null means "not measured", never zero or none:
++ *     BondedPosition.estimatedEpochUsdt (no forecast backend yet),
++ *     EpochDistribution.revenue and .costs (line items are off-chain records,
++ *     not events), PoolStats.grossReceivedUsdtToday / 7d / 30d and
++ *     distributedToParticipantsUsdt30d (need the event index; the last one
++ *     used to fall back to the lifetime total under a "30d" label), and
++ *     getTxHistory() when the index is not configured or cannot be read.
++ *     [] and 0 keep their meaning: measured, and nothing there.
++ *
++ * 16. v0.4.3 (audit 6, H-1 residual): new AdapterErrorCode ACCOUNT_CHANGED.
++ *     A write MUST NOT be signed by an account the UI has not been shown yet.
++ *     The chain adapter adopts a new account before it can publish it (it
++ *     reads the balances first), and in that window a confirm pressed on a
++ *     screen still showing the previous account would be signed by the new
++ *     one, skipping that account's first-bond acknowledgement. Writes now
++ *     refuse with ACCOUNT_CHANGED in that window, before anything is sent.
+  *
+  * ---------------------------------------------------------------------------
+  * DISTRIBUTION POLICY  v0.4   (read before implementing any money field)
+@@ -228,10 +255,12 @@ export interface EpochDistribution {
+   settledAt: Timestamp;
+   txHash: Hex;
+ 
+-  revenue: RevenueLine[];
++  /** Line items. null when not published yet (v0.4.2); the totals below still come from the chain. */
++  revenue: RevenueLine[] | null;
+   grossReceivedUsdt: Amount;
+ 
+-  costs: CostLine[];
++  /** Line items. null when not published yet (v0.4.2). */
++  costs: CostLine[] | null;
+   directCostsUsdt: Amount;
+   netRevenueUsdt: Amount;
+ 
+@@ -254,8 +283,12 @@ export interface EpochDistribution {
+   totalHcowDeducted: Amount;
+   /** Denominator for every participant share this epoch. */
+   snapshotBondedHcow: Amount;
+-  /** Share of grossReceivedUsdt that was chain verifiable. Ratio 0..1. */
+-  chainVerifiableRatio: Ratio;
++  /**
++   * Share of grossReceivedUsdt that was chain verifiable. Ratio 0..1.
++   * null when not measured (v0.4.1). The UI renders a dash and
++   * "Measurement pending", never 0%.
++   */
++  chainVerifiableRatio: Ratio | null;
+ }
+ 
+ // ============================================================
+@@ -269,8 +302,11 @@ export interface BondedPosition {
+   bondedAmount: Amount;
+   /** Ratio 0..1. Multiply by 100 for display. Floor tiny values at "< 0.01%". */
+   shareOfPool: Ratio;
+-  /** Forecast for the in-flight epoch. Backend-computed, not a contract read. */
+-  estimatedEpochUsdt: Amount;
++  /**
++   * Forecast for the in-flight epoch. Backend-computed, not a contract read.
++   * null until that backend exists (v0.4.2). Never render null as 0.
++   */
++  estimatedEpochUsdt: Amount | null;
+   /** null when no unbond is pending. Never undefined. */
+   pendingUnbondAmount: Amount | null;
+   /** Chain-authoritative. Never compute this from the client clock. */
+@@ -289,16 +325,29 @@ export interface PoolStats {
+    * "Based on last epoch. Not guaranteed." disclaimer beside it.
+    */
+   estimatedAprPct: Percent | null;
+-  /** Gross received. Rolling 24h, not calendar day. */
+-  grossReceivedUsdtToday: Amount;
+-  grossReceivedUsdt7d: Amount;
+-  grossReceivedUsdt30d: Amount;
+-  /** Actually paid to participants over the last 30 days. */
+-  distributedToParticipantsUsdt30d: Amount;
+-  /** Breakdown of grossReceivedUsdt30d by origin. Must sum to it. */
+-  revenue30dByOrigin: RevenueLine[];
+-  /** Share of the last 30d gross that was chain verifiable. Ratio 0..1. */
+-  chainVerifiableRatio30d: Ratio;
++  /**
++   * Gross received. Rolling 24h, not calendar day. The rolling windows need
++   * the event index: null when it is not configured or cannot be read
++   * (v0.4.2). 0 means measured, and nothing arrived.
++   */
++  grossReceivedUsdtToday: Amount | null;
++  grossReceivedUsdt7d: Amount | null;
++  grossReceivedUsdt30d: Amount | null;
++  /**
++   * Actually paid to participants over the last 30 days. null without the
++   * index (v0.4.2). Never substitute the lifetime total under this label.
++   */
++  distributedToParticipantsUsdt30d: Amount | null;
++  /**
++   * Breakdown of grossReceivedUsdt30d by origin. Must sum to it.
++   * null when not measured (v0.4.1); [] only when measured and nothing arrived.
++   */
++  revenue30dByOrigin: RevenueLine[] | null;
++  /**
++   * Share of the last 30d gross that was chain verifiable. Ratio 0..1.
++   * null when not measured (v0.4.1). Never render null as 0%.
++   */
++  chainVerifiableRatio30d: Ratio | null;
+   /** Data freshness signal for the rollups above. */
+   lastUpdatedAt: Timestamp;
+ }
+@@ -463,7 +512,12 @@ export interface IHcowAdapter {
+   getBondedPosition(): Promise<BondedPosition>;
+   getStakedPosition(): Promise<StakedPosition>;
+   getRepresentatives(): Promise<Representative[]>;
+-  getTxHistory(filter?: TxFilter): Promise<Transaction[]>;
++  /**
++   * null when the event index is not configured or cannot be read (v0.4.2):
++   * "history unavailable", not "no transactions". [] means read and empty,
++   * or no wallet connected.
++   */
++  getTxHistory(filter?: TxFilter): Promise<Transaction[] | null>;
+ 
+   // ---- WRITE: PROFIT SHARE ----
+   bond(amount: Amount): Promise<TxResult>;
+@@ -520,6 +574,7 @@ export type AdapterErrorCode =
+   | "TX_REVERTED"
+   | "TX_TIMEOUT"              // 60s cutoff. Keep watching in the background.
+   | "RPC_ERROR"
++  | "ACCOUNT_CHANGED"         // v0.4.3. The wallet switched account before the UI showed it. Nothing sent.
+   | "UNKNOWN_ERROR";
+ 
+ export class AdapterError extends Error {
+diff --git a/src/data/chain.ts b/src/data/chain.ts
+index b45574c..418cfe5 100644
+--- a/src/data/chain.ts
++++ b/src/data/chain.ts
+@@ -16,9 +16,13 @@
+  * Everything marked [C] in the original stub file is implemented and reads or
+  * writes real chain state. The methods marked [I] (event indexer) and [B]
+  * (backend) have no backend behind them yet. Rather than invent plausible
+- * numbers, this adapter returns zero, null or an empty list for those, and
++ * numbers, this adapter returns null for those wherever the interface allows
++ * it (adapter v0.4.2), and
+  * every such field is listed in CHAIN_ADAPTER_GAPS below so the UI, and
+  * anyone reading a screenshot, can tell a real zero from a missing one.
++ * Not yet converted: getBurnStats still reports 0 for burnedToday and the
++ * lifetime deduction total for last30dGamePaymentBurn when the index is
++ * unavailable (audit 6, M-4).
+  *
+  * The remaining gaps are genuinely off-chain and need the indexer:
+  *   revenue and cost line items, the rolling gross-received windows, burn
+@@ -95,6 +99,7 @@ export const CHAIN_ADAPTER_GAPS = {
+     "EpochDistribution.costs[]",
+     "EpochDistribution.chainVerifiableRatio",
+     "PoolStats.revenue30dByOrigin",
++    "PoolStats.chainVerifiableRatio30d",
+     "Transaction.epoch_settlement rows (needs per-account share replay)",
+   ],
+   needsBackend: [
+@@ -187,8 +192,17 @@ const snapshot = (): WalletState => ({
+   balances: session.address ? { ...session.balances } : { ...ZERO_BALANCES },
+ });
+ 
++/**
++ * The account the UI was last shown. requireSigner refuses to sign for any
++ * other account (audit 6, H-1 residual): adoptAccounts sets session.address
++ * before publish(), and a write in that gap would be signed by an account
++ * whose screen state (first-bond acknowledgement included) was never shown.
++ */
++let shownAddress: Address | null = null;
++
+ const publish = () => {
+   const s = snapshot();
++  shownAddress = s.address;
+   for (const cb of subscribers) {
+     try {
+       cb(s);
+@@ -239,6 +253,14 @@ async function requireSigner(): Promise<Signer> {
+       `Switch to ${DEPLOYMENT.chainName} (chain ${DEPLOYMENT.chainId}).`
+     );
+   }
++  if (shownAddress === null || shownAddress.toLowerCase() !== session.address.toLowerCase()) {
++    // Not published yet. Refuse rather than sign for an account the screen
++    // has not shown. adoptAccounts publishes it moments later.
++    throw new AdapterError(
++      "ACCOUNT_CHANGED",
++      "The wallet switched account before the page caught up. Nothing was sent."
++    );
++  }
+   const bp = new BrowserProvider(eth, DEPLOYMENT.chainId);
+   return bp.getSigner(session.address);
+ }
+@@ -518,6 +540,7 @@ export const chainAdapter: IHcowAdapter = {
+     // Rule F: fire once immediately, with fresh state rather than the cached
+     // snapshot, so a page reload does not show a stale account.
+     void chainAdapter.getWalletState().then((s) => {
++      shownAddress = s.address;
+       try {
+         cb(s);
+       } catch {
+@@ -595,10 +618,13 @@ export const chainAdapter: IHcowAdapter = {
+       txHash,
+ 
+       // Indexer gap. The contract stores the totals, not the line items.
+-      revenue: [],
++      // null is "not published yet" (adapter v0.4.2). [] made the waterfall
++      // print "No direct costs recorded 0.00" two rows above a non-zero
++      // directCostsUsdt read from the contract (audit 6, L-16).
++      revenue: null,
+       grossReceivedUsdt: gross,
+ 
+-      costs: [],
++      costs: null,
+       directCostsUsdt: direct,
+       netRevenueUsdt: gross - direct,
+ 
+@@ -614,16 +640,19 @@ export const chainAdapter: IHcowAdapter = {
+ 
+       totalHcowDeducted: toAmount(s.hcowDeducted),
+       snapshotBondedHcow: toAmount(s.snapshotBondedHcow),
+-      // Indexer gap. Requires the revenue lines to classify. Reported as 0
+-      // rather than 1 so an unproven epoch never looks fully verified.
+-      chainVerifiableRatio: 0,
++      // Indexer gap. Requires the revenue lines to classify. Reported as null,
++      // "not measured" (adapter v0.4.1). It used to be 0, chosen so an
++      // unproven epoch would not look fully verified; the UI then printed
++      // "0.0% chain verifiable" as if it had been measured (audit 6, C-2).
++      chainVerifiableRatio: null,
+     };
+   },
+ 
+   async getPoolStats(): Promise<PoolStats> {
+-    const [totalBonded, distributed, participants, windows] = await Promise.all([
++    // totalUsdtDistributed() is no longer read here: it is a lifetime figure
++    // and the only field it fed is labelled 30d (adapter v0.4.2).
++    const [totalBonded, participants, windows] = await Promise.all([
+       reader.profitShare.totalBondedHcow() as Promise<bigint>,
+-      reader.profitShare.totalUsdtDistributed() as Promise<bigint>,
+       reader.profitShare.participantCount() as Promise<bigint>,
+       revenueWindows(),
+     ]);
+@@ -639,17 +668,21 @@ export const chainAdapter: IHcowAdapter = {
+       estimatedAprPct: null,
+       // Rolling windows over EpochSettled. Receipt basis: an epoch's gross
+       // lands in the window its settlement did, which is the same basis the
+-      // policy uses. Zero when the index is unavailable.
+-      grossReceivedUsdtToday: w ? toAmount(BigInt(w.gross_24h)) : 0,
+-      grossReceivedUsdt7d: w ? toAmount(BigInt(w.gross_7d)) : 0,
+-      grossReceivedUsdt30d: w ? toAmount(BigInt(w.gross_30d)) : 0,
+-      // Falls back to the lifetime total from the contract when there is no
+-      // index. Over the first 30 days those are the same number anyway.
+-      distributedToParticipantsUsdt30d: w
+-        ? toAmount(BigInt(w.participants_30d))
+-        : toAmount(distributed),
+-      revenue30dByOrigin: [],
+-      chainVerifiableRatio30d: 0,
++      // policy uses. null when the index is unavailable (adapter v0.4.2): it
++      // used to be 0, which read as "nothing was received".
++      grossReceivedUsdtToday: w ? toAmount(BigInt(w.gross_24h)) : null,
++      grossReceivedUsdt7d: w ? toAmount(BigInt(w.gross_7d)) : null,
++      grossReceivedUsdt30d: w ? toAmount(BigInt(w.gross_30d)) : null,
++      // null without the index. It used to fall back to the lifetime total
++      // from the contract under a "30d" label, which could show more paid out
++      // than received next to a zero gross.
++      distributedToParticipantsUsdt30d: w ? toAmount(BigInt(w.participants_30d)) : null,
++      // Indexer gaps (CHAIN_ADAPTER_GAPS.needsIndexer). null is "not measured",
++      // not "nothing arrived": [] here made the Profit Share screen say "No
++      // money has been received into the vault in the last 30 days" on every
++      // load, next to a non-zero gross figure (audit 6, C-1). See adapter v0.4.1.
++      revenue30dByOrigin: null,
++      chainVerifiableRatio30d: null,
+       lastUpdatedAt: Date.now(),
+     };
+   },
+@@ -734,7 +767,9 @@ export const chainAdapter: IHcowAdapter = {
+       bondedAmount: bonded,
+       shareOfPool: pool > 0 ? bonded / pool : 0,
+       // Backend gap. A forecast needs revenue projection, not chain state.
+-      estimatedEpochUsdt: 0,
++      // null, "not forecast" (adapter v0.4.2). A 0 under a "Forecast" label
++      // was an invented number (audit 6, M-5).
++      estimatedEpochUsdt: null,
+       pendingUnbondAmount: pending > 0 ? pending : null,
+       // Rule H. Chain value, never Date.now() + cooldown.
+       pendingUnbondReadyAt: readyAt > 0 ? secToMs(readyAt) : null,
+@@ -813,14 +848,17 @@ export const chainAdapter: IHcowAdapter = {
+     return rows;
+   },
+ 
+-  async getTxHistory(filter: TxFilter = "all"): Promise<Transaction[]> {
++  async getTxHistory(filter: TxFilter = "all"): Promise<Transaction[] | null> {
+     // Deliberately not done with eth_getLogs from the browser: an unbounded
+     // multi-topic scan over a growing range is rate limited into failure on
+     // public BSC RPCs. The worker walks the chain once; this reads a table.
+-    if (!session.address || !indexerConfigured()) return [];
++    if (!session.address) return [];
++    // No index, or it could not be read: "unavailable", not "no transactions"
++    // (adapter v0.4.2, audit 6 L-8). indexer.ts forbids turning null into [].
++    if (!indexerConfigured()) return null;
+ 
+     const rows = await eventsForAccount(session.address, 100);
+-    if (!rows) return [];
++    if (!rows) return null;
+ 
+     const out: Transaction[] = [];
+     for (const row of rows) {
+diff --git a/src/data/mock.ts b/src/data/mock.ts
+index e01869b..ba220a5 100644
+--- a/src/data/mock.ts
++++ b/src/data/mock.ts
+@@ -339,7 +339,8 @@ export const mockAdapter: IHcowAdapter = {
+   },
+ 
+   async getPoolStats() {
+-    return { ...store.pool, revenue30dByOrigin: store.pool.revenue30dByOrigin.map((r) => ({ ...r })) };
++    // adapter v0.4.1: the field is nullable ("not measured"). The mock always has it.
++    return { ...store.pool, revenue30dByOrigin: store.pool.revenue30dByOrigin?.map((r) => ({ ...r })) ?? null };
+   },
+ 
+   async getNetworkStats() {
+diff --git a/src/lib/errors.ts b/src/lib/errors.ts
+index ec7d508..94af9a9 100644
+--- a/src/lib/errors.ts
++++ b/src/lib/errors.ts
+@@ -24,6 +24,12 @@ export interface ErrorPresentation {
+ }
+ 
+ const MAP: Record<AdapterErrorCode, ErrorPresentation> = {
++  ACCOUNT_CHANGED: {
++    tone: "warning",
++    title: "Wallet account changed",
++    body: "Your wallet switched to another account before this was sent. Nothing was sent. Check the details for the new account and try again.",
++    keepModalOpen: false,
++  },
+   USER_REJECTED: {
+     tone: "info",
+     title: "Transaction cancelled",
+diff --git a/src/screens/HomeScreen.tsx b/src/screens/HomeScreen.tsx
+index ba6e81a..c5558a3 100644
+--- a/src/screens/HomeScreen.tsx
++++ b/src/screens/HomeScreen.tsx
+@@ -36,6 +36,7 @@ import {
+   LoadingBlock,
+   Metric,
+   MONO,
++  NotMeasured,
+   ProgressBar,
+   SectionLabel,
+   Skeleton,
+@@ -185,20 +186,20 @@ export function HomeScreen({ wallet, walletKey, canRead, pushToast, onNavigate,
+         <AutoGrid min={230}>
+           <Metric
+             label="Gross received · 24h"
+-            value={pool ? fmtAmount(pool.grossReceivedUsdtToday) : <Skeleton width={120} height={24} />}
+-            unit={pool ? PROTOCOL.REWARD_CURRENCY : undefined}
++            value={pool ? (pool.grossReceivedUsdtToday === null ? <NotMeasured /> : fmtAmount(pool.grossReceivedUsdtToday)) : <Skeleton width={120} height={24} />}
++            unit={pool && pool.grossReceivedUsdtToday !== null ? PROTOCOL.REWARD_CURRENCY : undefined}
+             hint="Rolling 24 hours, receipt basis."
+           />
+           <Metric
+             label="Gross received · 7d"
+-            value={pool ? fmtAmount(pool.grossReceivedUsdt7d) : <Skeleton width={120} height={24} />}
+-            unit={pool ? PROTOCOL.REWARD_CURRENCY : undefined}
++            value={pool ? (pool.grossReceivedUsdt7d === null ? <NotMeasured /> : fmtAmount(pool.grossReceivedUsdt7d)) : <Skeleton width={120} height={24} />}
++            unit={pool && pool.grossReceivedUsdt7d !== null ? PROTOCOL.REWARD_CURRENCY : undefined}
+             hint="Money actually received into the vault."
+           />
+           <Metric
+             label="Paid to participants · 30d"
+-            value={pool ? fmtAmount(pool.distributedToParticipantsUsdt30d) : <Skeleton width={120} height={24} />}
+-            unit={pool ? PROTOCOL.REWARD_CURRENCY : undefined}
++            value={pool ? (pool.distributedToParticipantsUsdt30d === null ? <NotMeasured /> : fmtAmount(pool.distributedToParticipantsUsdt30d)) : <Skeleton width={120} height={24} />}
++            unit={pool && pool.distributedToParticipantsUsdt30d !== null ? PROTOCOL.REWARD_CURRENCY : undefined}
+             hint="Settled and claimable, not a forecast."
+             tone="ok"
+           />
+@@ -229,13 +230,24 @@ export function HomeScreen({ wallet, walletKey, canRead, pushToast, onNavigate,
+           <div style={{ marginTop: 16 }}>
+             <Card
+               kicker="Provability · last 30 days"
+-              title={`${fmtRatioPct(pool.chainVerifiableRatio30d, 1)} of gross received was chain verifiable`}
++              title={
++                pool.chainVerifiableRatio30d === null
++                  ? "Chain verifiable share of gross received"
++                  : `${fmtRatioPct(pool.chainVerifiableRatio30d, 1)} of gross received was chain verifiable`
++              }
+             >
+-              <ProgressBar ratio={pool.chainVerifiableRatio30d} label="Chain verifiable share of gross received over 30 days" />
+-              <p style={{ margin: "12px 0 0", fontSize: 12, color: T.tSec, lineHeight: 1.6 }}>
+-                The rest arrived off chain and is attested by published payout statements paired with the on-chain
+-                deposit that carried it in. Per-line detail is in the epoch waterfall below.
+-              </p>
++              {pool.chainVerifiableRatio30d === null ? (
++                <NotMeasured />
++              ) : (
++                <ProgressBar ratio={pool.chainVerifiableRatio30d} label="Chain verifiable share of gross received over 30 days" />
++              )}
++              {/* "The rest" only has a referent once the share is measured (audit 6, C-2). */}
++              {pool.chainVerifiableRatio30d === null ? null : (
++                <p style={{ margin: "12px 0 0", fontSize: 12, color: T.tSec, lineHeight: 1.6 }}>
++                  The rest arrived off chain and is attested by published payout statements paired with the on-chain
++                  deposit that carried it in. Per-line detail is in the epoch waterfall below.
++                </p>
++              )}
+             </Card>
+           </div>
+         ) : null}
+diff --git a/src/screens/PortfolioScreen.tsx b/src/screens/PortfolioScreen.tsx
+index 42f0d5b..8dd0745 100644
+--- a/src/screens/PortfolioScreen.tsx
++++ b/src/screens/PortfolioScreen.tsx
+@@ -118,7 +118,15 @@ export function PortfolioScreen({
+     return { bonded, staked };
+   }, [walletKey], canRead);
+ 
+-  const history = useAsync<Transaction[]>(() => adapter.getTxHistory(filter), [walletKey, filter], canRead);
++  // Wrapped so that "no result yet" (data === null) cannot be confused with
++  // "the index answered null" (data.rows === null). useAsync reports
++  // { data: null, loading: false } for one render when canRead turns true,
++  // and that frame must read as loading, not as "History unavailable".
++  const history = useAsync<{ rows: Transaction[] | null }>(
++    async () => ({ rows: await adapter.getTxHistory(filter) }),
++    [walletKey, filter],
++    canRead,
++  );
+ 
+   useErrorToast(positions.error, pushToast);
+   useErrorToast(history.error, pushToast);
+@@ -154,7 +162,8 @@ export function PortfolioScreen({
+   }
+ 
+   const pos = positions.data;
+-  const rows = history.data;
++  // undefined: no settled result yet. null: index unavailable or the read failed.
++  const rows: Transaction[] | null | undefined = history.error ? null : history.data ? history.data.rows : undefined;
+ 
+   return (
+     <div style={{ display: "grid", gap: 32 }}>
+@@ -304,8 +313,15 @@ export function PortfolioScreen({
+ 
+         <div id="tx-panel" role="tabpanel" aria-labelledby={`txtab-${filter}`} tabIndex={0}>
+           <Card padding={16}>
+-            {history.loading || rows === null ? (
++            {history.loading || rows === undefined ? (
+               <LoadingBlock label="Loading transaction history" rows={6} />
++            ) : rows === null ? (
++              // Index not configured or unreadable, or the read failed
++              // (adapter v0.4.2, audit 6 L-8). Not "no transactions".
++              <EmptyState
++                title="History unavailable"
++                body="The transaction index is not available. This is not a statement that there are no transactions. Balances above are read directly from the chain."
++              />
+             ) : rows.length === 0 ? (
+               <EmptyState
+                 title="No transactions yet"
+diff --git a/src/screens/ProfitShareScreen.tsx b/src/screens/ProfitShareScreen.tsx
+index ee4b7ec..233abe7 100644
+--- a/src/screens/ProfitShareScreen.tsx
++++ b/src/screens/ProfitShareScreen.tsx
+@@ -36,6 +36,7 @@ import {
+   LoadingBlock,
+   Metric,
+   MONO,
++  NotMeasured,
+   SectionLabel,
+   Skeleton,
+ } from "../components/ui";
+@@ -138,7 +139,14 @@ export function ProfitShareScreen({
+   const amountReady = !amountEmpty && !amountInvalid;
+ 
+   const firstBond = pos ? pos.status === "first_time" || pos.bondedAmount === 0 : true;
+-  const needsAck = modal === "bond" && firstBond;
++  // Decided by the position, not by which button opened the modal. A modal
++  // opened as "topup" must still ask when the position says first bond
++  // (audit 6, H-1). The key on this screen in App.tsx is the primary guard;
++  // this one holds even if the screen is ever rendered without it.
++  const needsAck = isDeposit && firstBond;
++  // Never confirm a deposit against a position that is still loading or
++  // being refetched: the acknowledgement decision above would be stale.
++  const positionSettled = !!pos && !position.loading;
+ 
+   function amountHint(): string {
+     if (amountInvalid && parsed > maxForModal) {
+@@ -208,14 +216,14 @@ export function ProfitShareScreen({
+           />
+           <Metric
+             label="Gross received · 30d"
+-            value={pool ? fmtAmount(pool.grossReceivedUsdt30d) : <Skeleton width={120} height={24} />}
+-            unit={pool ? PROTOCOL.REWARD_CURRENCY : undefined}
++            value={pool ? (pool.grossReceivedUsdt30d === null ? <NotMeasured /> : fmtAmount(pool.grossReceivedUsdt30d)) : <Skeleton width={120} height={24} />}
++            unit={pool && pool.grossReceivedUsdt30d !== null ? PROTOCOL.REWARD_CURRENCY : undefined}
+             hint="Receipt basis. Store payouts land one to two months late."
+           />
+           <Metric
+             label="Paid to participants · 30d"
+-            value={pool ? fmtAmount(pool.distributedToParticipantsUsdt30d) : <Skeleton width={120} height={24} />}
+-            unit={pool ? PROTOCOL.REWARD_CURRENCY : undefined}
++            value={pool ? (pool.distributedToParticipantsUsdt30d === null ? <NotMeasured /> : fmtAmount(pool.distributedToParticipantsUsdt30d)) : <Skeleton width={120} height={24} />}
++            unit={pool && pool.distributedToParticipantsUsdt30d !== null ? PROTOCOL.REWARD_CURRENCY : undefined}
+             tone="ok"
+           />
+           <Metric label="Estimated APR" value={pool ? <Apr pct={pool.estimatedAprPct} /> : <Skeleton width={90} height={24} />} />
+@@ -224,10 +232,19 @@ export function ProfitShareScreen({
+         <div style={{ marginTop: 16 }}>
+           <Card
+             kicker="Where the money came from · last 30 days"
+-            title={pool ? `${fmtRatioPct(pool.chainVerifiableRatio30d, 1)} chain verifiable` : "Revenue by origin"}
++            title={
++              pool && pool.chainVerifiableRatio30d !== null
++                ? `${fmtRatioPct(pool.chainVerifiableRatio30d, 1)} chain verifiable`
++                : "Revenue by origin"
++            }
+           >
+             {pool ? (
+-              pool.revenue30dByOrigin.length === 0 ? (
++              pool.revenue30dByOrigin === null ? (
++                <EmptyState
++                  title="Measurement pending"
++                  body="The breakdown by origin is not measured yet. This is not a statement that nothing was received."
++                />
++              ) : pool.revenue30dByOrigin.length === 0 ? (
+                 <EmptyState title="No revenue recorded" body="No money has been received into the vault in the last 30 days." />
+               ) : (
+                 <div>
+@@ -307,7 +324,13 @@ export function ProfitShareScreen({
+                 <KV label="Share of pool" value={fmtRatioPct(pos.shareOfPool)} sub="At the last snapshot." />
+                 <KV
+                   label="Forecast for this epoch"
+-                  value={fmtUsdt(pos.estimatedEpochUsdt)}
++                  value={
++                    pos.estimatedEpochUsdt === null ? (
++                      <NotMeasured size="sm" label="Forecast pending" />
++                    ) : (
++                      fmtUsdt(pos.estimatedEpochUsdt)
++                    )
++                  }
+                   sub="Forecast for the in-flight epoch. Not a promise."
+                 />
+                 <KV label="Deducted to date" value={fmtHcow(pos.lifetimeDeductedHcow)} tone="warn" />
+@@ -380,7 +403,7 @@ export function ProfitShareScreen({
+             </Button>
+             <Button
+               variant="primary"
+-              disabled={busy || !amountReady || (needsAck && !ack)}
++              disabled={busy || !positionSettled || !amountReady || (needsAck && !ack)}
+               onClick={() =>
+                 void submit(
+                   () => (modal === "topup" ? adapter.topUpBond(parsed) : adapter.bond(parsed)),

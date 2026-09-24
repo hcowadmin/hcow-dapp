@@ -568,6 +568,25 @@ export function AddressChip({ address, label }: AddressChipProps) {
 }
 
 /* ============================================================
+   NOT MEASURED
+   ============================================================
+   For adapter fields that are null because their data source does not
+   exist yet (adapter v0.4.1). A dash and "Measurement pending", like the
+   APR below. An unmeasured value is never rendered as 0 or as an empty
+   result: in this product a 0% "chain verifiable" or "nothing received"
+   reads as a statement of fact (audit 6, C-1 and C-2). */
+
+export function NotMeasured({ size = "lg", label = "Measurement pending" }: { size?: "lg" | "sm"; label?: string }) {
+  const big = size === "lg";
+  return (
+    <span style={{ display: "inline-flex", flexDirection: "column", gap: 4 }}>
+      <span style={{ ...MONO, fontSize: big ? 26 : 14, color: T.tSec }}>—</span>
+      <span style={{ fontSize: 11, color: T.tSec }}>{label}</span>
+    </span>
+  );
+}
+
+/* ============================================================
    APR
    ============================================================
    PoolStats / StakedPosition / Representative all expose

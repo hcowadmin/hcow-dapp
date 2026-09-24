@@ -31,6 +31,33 @@
  *     Profit Share. The full epoch waterfall is published via
  *     EpochDistribution. The opex cap, the closed cost list, and the
  *     no-distribution-no-deduction rule are now part of the contract.
+ * 14. v0.4.1 (audit 6, C-1 and C-2): three fields can now say "not measured".
+ *     EpochDistribution.chainVerifiableRatio, PoolStats.chainVerifiableRatio30d
+ *     and PoolStats.revenue30dByOrigin are nullable. null means the data source
+ *     does not exist yet (the revenue index); it is NOT zero and must never be
+ *     rendered as 0% or as "nothing was received". An empty revenue30dByOrigin
+ *     array still means "measured, and nothing arrived". Same pattern as
+ *     estimatedAprPct. The interface could not express "unknown" before, so the
+ *     chain adapter reported 0 and [] and the UI turned those into statements
+ *     of fact. This edit is the interface owner's decision of 2026-09-22.
+ *
+ * 15. v0.4.2 (audit 6, M-5, L-8, L-16 and the 30d fallbacks): the same rule
+ *     for the remaining gaps. null means "not measured", never zero or none:
+ *     BondedPosition.estimatedEpochUsdt (no forecast backend yet),
+ *     EpochDistribution.revenue and .costs (line items are off-chain records,
+ *     not events), PoolStats.grossReceivedUsdtToday / 7d / 30d and
+ *     distributedToParticipantsUsdt30d (need the event index; the last one
+ *     used to fall back to the lifetime total under a "30d" label), and
+ *     getTxHistory() when the index is not configured or cannot be read.
+ *     [] and 0 keep their meaning: measured, and nothing there.
+ *
+ * 16. v0.4.3 (audit 6, H-1 residual): new AdapterErrorCode ACCOUNT_CHANGED.
+ *     A write MUST NOT be signed by an account the UI has not been shown yet.
+ *     The chain adapter adopts a new account before it can publish it (it
+ *     reads the balances first), and in that window a confirm pressed on a
+ *     screen still showing the previous account would be signed by the new
+ *     one, skipping that account's first-bond acknowledgement. Writes now
+ *     refuse with ACCOUNT_CHANGED in that window, before anything is sent.
  *
  * ---------------------------------------------------------------------------
  * DISTRIBUTION POLICY  v0.4   (read before implementing any money field)
@@ -228,10 +255,12 @@ export interface EpochDistribution {
   settledAt: Timestamp;
   txHash: Hex;
 
-  revenue: RevenueLine[];
+  /** Line items. null when not published yet (v0.4.2); the totals below still come from the chain. */
+  revenue: RevenueLine[] | null;
   grossReceivedUsdt: Amount;
 
-  costs: CostLine[];
+  /** Line items. null when not published yet (v0.4.2). */
+  costs: CostLine[] | null;
   directCostsUsdt: Amount;
   netRevenueUsdt: Amount;
 
@@ -254,8 +283,12 @@ export interface EpochDistribution {
   totalHcowDeducted: Amount;
   /** Denominator for every participant share this epoch. */
   snapshotBondedHcow: Amount;
-  /** Share of grossReceivedUsdt that was chain verifiable. Ratio 0..1. */
-  chainVerifiableRatio: Ratio;
+  /**
+   * Share of grossReceivedUsdt that was chain verifiable. Ratio 0..1.
+   * null when not measured (v0.4.1). The UI renders a dash and
+   * "Measurement pending", never 0%.
+   */
+  chainVerifiableRatio: Ratio | null;
 }
 
 // ============================================================
@@ -269,8 +302,11 @@ export interface BondedPosition {
   bondedAmount: Amount;
   /** Ratio 0..1. Multiply by 100 for display. Floor tiny values at "< 0.01%". */
   shareOfPool: Ratio;
-  /** Forecast for the in-flight epoch. Backend-computed, not a contract read. */
-  estimatedEpochUsdt: Amount;
+  /**
+   * Forecast for the in-flight epoch. Backend-computed, not a contract read.
+   * null until that backend exists (v0.4.2). Never render null as 0.
+   */
+  estimatedEpochUsdt: Amount | null;
   /** null when no unbond is pending. Never undefined. */
   pendingUnbondAmount: Amount | null;
   /** Chain-authoritative. Never compute this from the client clock. */
@@ -289,16 +325,29 @@ export interface PoolStats {
    * "Based on last epoch. Not guaranteed." disclaimer beside it.
    */
   estimatedAprPct: Percent | null;
-  /** Gross received. Rolling 24h, not calendar day. */
-  grossReceivedUsdtToday: Amount;
-  grossReceivedUsdt7d: Amount;
-  grossReceivedUsdt30d: Amount;
-  /** Actually paid to participants over the last 30 days. */
-  distributedToParticipantsUsdt30d: Amount;
-  /** Breakdown of grossReceivedUsdt30d by origin. Must sum to it. */
-  revenue30dByOrigin: RevenueLine[];
-  /** Share of the last 30d gross that was chain verifiable. Ratio 0..1. */
-  chainVerifiableRatio30d: Ratio;
+  /**
+   * Gross received. Rolling 24h, not calendar day. The rolling windows need
+   * the event index: null when it is not configured or cannot be read
+   * (v0.4.2). 0 means measured, and nothing arrived.
+   */
+  grossReceivedUsdtToday: Amount | null;
+  grossReceivedUsdt7d: Amount | null;
+  grossReceivedUsdt30d: Amount | null;
+  /**
+   * Actually paid to participants over the last 30 days. null without the
+   * index (v0.4.2). Never substitute the lifetime total under this label.
+   */
+  distributedToParticipantsUsdt30d: Amount | null;
+  /**
+   * Breakdown of grossReceivedUsdt30d by origin. Must sum to it.
+   * null when not measured (v0.4.1); [] only when measured and nothing arrived.
+   */
+  revenue30dByOrigin: RevenueLine[] | null;
+  /**
+   * Share of the last 30d gross that was chain verifiable. Ratio 0..1.
+   * null when not measured (v0.4.1). Never render null as 0%.
+   */
+  chainVerifiableRatio30d: Ratio | null;
   /** Data freshness signal for the rollups above. */
   lastUpdatedAt: Timestamp;
 }
@@ -463,7 +512,12 @@ export interface IHcowAdapter {
   getBondedPosition(): Promise<BondedPosition>;
   getStakedPosition(): Promise<StakedPosition>;
   getRepresentatives(): Promise<Representative[]>;
-  getTxHistory(filter?: TxFilter): Promise<Transaction[]>;
+  /**
+   * null when the event index is not configured or cannot be read (v0.4.2):
+   * "history unavailable", not "no transactions". [] means read and empty,
+   * or no wallet connected.
+   */
+  getTxHistory(filter?: TxFilter): Promise<Transaction[] | null>;
 
   // ---- WRITE: PROFIT SHARE ----
   bond(amount: Amount): Promise<TxResult>;
@@ -520,6 +574,7 @@ export type AdapterErrorCode =
   | "TX_REVERTED"
   | "TX_TIMEOUT"              // 60s cutoff. Keep watching in the background.
   | "RPC_ERROR"
+  | "ACCOUNT_CHANGED"         // v0.4.3. The wallet switched account before the UI showed it. Nothing sent.
   | "UNKNOWN_ERROR";
 
 export class AdapterError extends Error {

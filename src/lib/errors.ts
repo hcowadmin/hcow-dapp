@@ -24,6 +24,12 @@ export interface ErrorPresentation {
 }
 
 const MAP: Record<AdapterErrorCode, ErrorPresentation> = {
+  ACCOUNT_CHANGED: {
+    tone: "warning",
+    title: "Wallet account changed",
+    body: "Your wallet switched to another account before this was sent. Nothing was sent. Check the details for the new account and try again.",
+    keepModalOpen: false,
+  },
   USER_REJECTED: {
     tone: "info",
     title: "Transaction cancelled",

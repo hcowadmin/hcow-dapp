@@ -16,9 +16,13 @@
  * Everything marked [C] in the original stub file is implemented and reads or
  * writes real chain state. The methods marked [I] (event indexer) and [B]
  * (backend) have no backend behind them yet. Rather than invent plausible
- * numbers, this adapter returns zero, null or an empty list for those, and
+ * numbers, this adapter returns null for those wherever the interface allows
+ * it (adapter v0.4.2), and
  * every such field is listed in CHAIN_ADAPTER_GAPS below so the UI, and
  * anyone reading a screenshot, can tell a real zero from a missing one.
+ * Not yet converted: getBurnStats still reports 0 for burnedToday and the
+ * lifetime deduction total for last30dGamePaymentBurn when the index is
+ * unavailable (audit 6, M-4).
  *
  * The remaining gaps are genuinely off-chain and need the indexer:
  *   revenue and cost line items, the rolling gross-received windows, burn
@@ -95,6 +99,7 @@ export const CHAIN_ADAPTER_GAPS = {
     "EpochDistribution.costs[]",
     "EpochDistribution.chainVerifiableRatio",
     "PoolStats.revenue30dByOrigin",
+    "PoolStats.chainVerifiableRatio30d",
     "Transaction.epoch_settlement rows (needs per-account share replay)",
   ],
   needsBackend: [
@@ -187,8 +192,17 @@ const snapshot = (): WalletState => ({
   balances: session.address ? { ...session.balances } : { ...ZERO_BALANCES },
 });
 
+/**
+ * The account the UI was last shown. requireSigner refuses to sign for any
+ * other account (audit 6, H-1 residual): adoptAccounts sets session.address
+ * before publish(), and a write in that gap would be signed by an account
+ * whose screen state (first-bond acknowledgement included) was never shown.
+ */
+let shownAddress: Address | null = null;
+
 const publish = () => {
   const s = snapshot();
+  shownAddress = s.address;
   for (const cb of subscribers) {
     try {
       cb(s);
@@ -237,6 +251,14 @@ async function requireSigner(): Promise<Signer> {
     throw new AdapterError(
       "WRONG_NETWORK",
       `Switch to ${DEPLOYMENT.chainName} (chain ${DEPLOYMENT.chainId}).`
+    );
+  }
+  if (shownAddress === null || shownAddress.toLowerCase() !== session.address.toLowerCase()) {
+    // Not published yet. Refuse rather than sign for an account the screen
+    // has not shown. adoptAccounts publishes it moments later.
+    throw new AdapterError(
+      "ACCOUNT_CHANGED",
+      "The wallet switched account before the page caught up. Nothing was sent."
     );
   }
   const bp = new BrowserProvider(eth, DEPLOYMENT.chainId);
@@ -518,6 +540,7 @@ export const chainAdapter: IHcowAdapter = {
     // Rule F: fire once immediately, with fresh state rather than the cached
     // snapshot, so a page reload does not show a stale account.
     void chainAdapter.getWalletState().then((s) => {
+      shownAddress = s.address;
       try {
         cb(s);
       } catch {
@@ -595,10 +618,13 @@ export const chainAdapter: IHcowAdapter = {
       txHash,
 
       // Indexer gap. The contract stores the totals, not the line items.
-      revenue: [],
+      // null is "not published yet" (adapter v0.4.2). [] made the waterfall
+      // print "No direct costs recorded 0.00" two rows above a non-zero
+      // directCostsUsdt read from the contract (audit 6, L-16).
+      revenue: null,
       grossReceivedUsdt: gross,
 
-      costs: [],
+      costs: null,
       directCostsUsdt: direct,
       netRevenueUsdt: gross - direct,
 
@@ -614,16 +640,19 @@ export const chainAdapter: IHcowAdapter = {
 
       totalHcowDeducted: toAmount(s.hcowDeducted),
       snapshotBondedHcow: toAmount(s.snapshotBondedHcow),
-      // Indexer gap. Requires the revenue lines to classify. Reported as 0
-      // rather than 1 so an unproven epoch never looks fully verified.
-      chainVerifiableRatio: 0,
+      // Indexer gap. Requires the revenue lines to classify. Reported as null,
+      // "not measured" (adapter v0.4.1). It used to be 0, chosen so an
+      // unproven epoch would not look fully verified; the UI then printed
+      // "0.0% chain verifiable" as if it had been measured (audit 6, C-2).
+      chainVerifiableRatio: null,
     };
   },
 
   async getPoolStats(): Promise<PoolStats> {
-    const [totalBonded, distributed, participants, windows] = await Promise.all([
+    // totalUsdtDistributed() is no longer read here: it is a lifetime figure
+    // and the only field it fed is labelled 30d (adapter v0.4.2).
+    const [totalBonded, participants, windows] = await Promise.all([
       reader.profitShare.totalBondedHcow() as Promise<bigint>,
-      reader.profitShare.totalUsdtDistributed() as Promise<bigint>,
       reader.profitShare.participantCount() as Promise<bigint>,
       revenueWindows(),
     ]);
@@ -639,17 +668,21 @@ export const chainAdapter: IHcowAdapter = {
       estimatedAprPct: null,
       // Rolling windows over EpochSettled. Receipt basis: an epoch's gross
       // lands in the window its settlement did, which is the same basis the
-      // policy uses. Zero when the index is unavailable.
-      grossReceivedUsdtToday: w ? toAmount(BigInt(w.gross_24h)) : 0,
-      grossReceivedUsdt7d: w ? toAmount(BigInt(w.gross_7d)) : 0,
-      grossReceivedUsdt30d: w ? toAmount(BigInt(w.gross_30d)) : 0,
-      // Falls back to the lifetime total from the contract when there is no
-      // index. Over the first 30 days those are the same number anyway.
-      distributedToParticipantsUsdt30d: w
-        ? toAmount(BigInt(w.participants_30d))
-        : toAmount(distributed),
-      revenue30dByOrigin: [],
-      chainVerifiableRatio30d: 0,
+      // policy uses. null when the index is unavailable (adapter v0.4.2): it
+      // used to be 0, which read as "nothing was received".
+      grossReceivedUsdtToday: w ? toAmount(BigInt(w.gross_24h)) : null,
+      grossReceivedUsdt7d: w ? toAmount(BigInt(w.gross_7d)) : null,
+      grossReceivedUsdt30d: w ? toAmount(BigInt(w.gross_30d)) : null,
+      // null without the index. It used to fall back to the lifetime total
+      // from the contract under a "30d" label, which could show more paid out
+      // than received next to a zero gross.
+      distributedToParticipantsUsdt30d: w ? toAmount(BigInt(w.participants_30d)) : null,
+      // Indexer gaps (CHAIN_ADAPTER_GAPS.needsIndexer). null is "not measured",
+      // not "nothing arrived": [] here made the Profit Share screen say "No
+      // money has been received into the vault in the last 30 days" on every
+      // load, next to a non-zero gross figure (audit 6, C-1). See adapter v0.4.1.
+      revenue30dByOrigin: null,
+      chainVerifiableRatio30d: null,
       lastUpdatedAt: Date.now(),
     };
   },
@@ -734,7 +767,9 @@ export const chainAdapter: IHcowAdapter = {
       bondedAmount: bonded,
       shareOfPool: pool > 0 ? bonded / pool : 0,
       // Backend gap. A forecast needs revenue projection, not chain state.
-      estimatedEpochUsdt: 0,
+      // null, "not forecast" (adapter v0.4.2). A 0 under a "Forecast" label
+      // was an invented number (audit 6, M-5).
+      estimatedEpochUsdt: null,
       pendingUnbondAmount: pending > 0 ? pending : null,
       // Rule H. Chain value, never Date.now() + cooldown.
       pendingUnbondReadyAt: readyAt > 0 ? secToMs(readyAt) : null,
@@ -813,14 +848,17 @@ export const chainAdapter: IHcowAdapter = {
     return rows;
   },
 
-  async getTxHistory(filter: TxFilter = "all"): Promise<Transaction[]> {
+  async getTxHistory(filter: TxFilter = "all"): Promise<Transaction[] | null> {
     // Deliberately not done with eth_getLogs from the browser: an unbounded
     // multi-topic scan over a growing range is rate limited into failure on
     // public BSC RPCs. The worker walks the chain once; this reads a table.
-    if (!session.address || !indexerConfigured()) return [];
+    if (!session.address) return [];
+    // No index, or it could not be read: "unavailable", not "no transactions"
+    // (adapter v0.4.2, audit 6 L-8). indexer.ts forbids turning null into [].
+    if (!indexerConfigured()) return null;
 
     const rows = await eventsForAccount(session.address, 100);
-    if (!rows) return [];
+    if (!rows) return null;
 
     const out: Transaction[] = [];
     for (const row of rows) {

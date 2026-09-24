@@ -36,6 +36,7 @@ import {
   LoadingBlock,
   Metric,
   MONO,
+  NotMeasured,
   ProgressBar,
   SectionLabel,
   Skeleton,
@@ -185,20 +186,20 @@ export function HomeScreen({ wallet, walletKey, canRead, pushToast, onNavigate, 
         <AutoGrid min={230}>
           <Metric
             label="Gross received · 24h"
-            value={pool ? fmtAmount(pool.grossReceivedUsdtToday) : <Skeleton width={120} height={24} />}
-            unit={pool ? PROTOCOL.REWARD_CURRENCY : undefined}
+            value={pool ? (pool.grossReceivedUsdtToday === null ? <NotMeasured /> : fmtAmount(pool.grossReceivedUsdtToday)) : <Skeleton width={120} height={24} />}
+            unit={pool && pool.grossReceivedUsdtToday !== null ? PROTOCOL.REWARD_CURRENCY : undefined}
             hint="Rolling 24 hours, receipt basis."
           />
           <Metric
             label="Gross received · 7d"
-            value={pool ? fmtAmount(pool.grossReceivedUsdt7d) : <Skeleton width={120} height={24} />}
-            unit={pool ? PROTOCOL.REWARD_CURRENCY : undefined}
+            value={pool ? (pool.grossReceivedUsdt7d === null ? <NotMeasured /> : fmtAmount(pool.grossReceivedUsdt7d)) : <Skeleton width={120} height={24} />}
+            unit={pool && pool.grossReceivedUsdt7d !== null ? PROTOCOL.REWARD_CURRENCY : undefined}
             hint="Money actually received into the vault."
           />
           <Metric
             label="Paid to participants · 30d"
-            value={pool ? fmtAmount(pool.distributedToParticipantsUsdt30d) : <Skeleton width={120} height={24} />}
-            unit={pool ? PROTOCOL.REWARD_CURRENCY : undefined}
+            value={pool ? (pool.distributedToParticipantsUsdt30d === null ? <NotMeasured /> : fmtAmount(pool.distributedToParticipantsUsdt30d)) : <Skeleton width={120} height={24} />}
+            unit={pool && pool.distributedToParticipantsUsdt30d !== null ? PROTOCOL.REWARD_CURRENCY : undefined}
             hint="Settled and claimable, not a forecast."
             tone="ok"
           />
@@ -229,13 +230,24 @@ export function HomeScreen({ wallet, walletKey, canRead, pushToast, onNavigate, 
           <div style={{ marginTop: 16 }}>
             <Card
               kicker="Provability · last 30 days"
-              title={`${fmtRatioPct(pool.chainVerifiableRatio30d, 1)} of gross received was chain verifiable`}
+              title={
+                pool.chainVerifiableRatio30d === null
+                  ? "Chain verifiable share of gross received"
+                  : `${fmtRatioPct(pool.chainVerifiableRatio30d, 1)} of gross received was chain verifiable`
+              }
             >
-              <ProgressBar ratio={pool.chainVerifiableRatio30d} label="Chain verifiable share of gross received over 30 days" />
-              <p style={{ margin: "12px 0 0", fontSize: 12, color: T.tSec, lineHeight: 1.6 }}>
-                The rest arrived off chain and is attested by published payout statements paired with the on-chain
-                deposit that carried it in. Per-line detail is in the epoch waterfall below.
-              </p>
+              {pool.chainVerifiableRatio30d === null ? (
+                <NotMeasured />
+              ) : (
+                <ProgressBar ratio={pool.chainVerifiableRatio30d} label="Chain verifiable share of gross received over 30 days" />
+              )}
+              {/* "The rest" only has a referent once the share is measured (audit 6, C-2). */}
+              {pool.chainVerifiableRatio30d === null ? null : (
+                <p style={{ margin: "12px 0 0", fontSize: 12, color: T.tSec, lineHeight: 1.6 }}>
+                  The rest arrived off chain and is attested by published payout statements paired with the on-chain
+                  deposit that carried it in. Per-line detail is in the epoch waterfall below.
+                </p>
+              )}
             </Card>
           </div>
         ) : null}

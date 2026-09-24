@@ -16,7 +16,7 @@ import { T } from "../config/tokens";
 import { PROTOCOL, txUrl } from "../config/constants";
 import type { CostCategory, CostLine, EpochDistribution, RevenueLine, RevenueOrigin } from "../data";
 import { fmtDate, fmtHcow, fmtRatioPct, fmtUsdt, shortHash } from "../lib/format";
-import { Badge, Divider, ExtLink, MONO, ProgressBar, toneColors } from "./ui";
+import { Badge, Divider, ExtLink, MONO, NotMeasured, ProgressBar, toneColors } from "./ui";
 
 /**
  * Display names for revenue origins. The remaining off-chain table-game origin
@@ -185,8 +185,9 @@ export interface EpochWaterfallProps {
 }
 
 export function EpochWaterfall({ distribution: d }: EpochWaterfallProps) {
-  const directLines = d.costs.filter((c) => c.isDirect);
-  const opexLines = d.costs.filter((c) => !c.isDirect);
+  // null: line items not published yet (adapter v0.4.2). Only [] means none.
+  const directLines = d.costs === null ? null : d.costs.filter((c) => c.isDirect);
+  const opexLines = d.costs === null ? null : d.costs.filter((c) => !c.isDirect);
 
   return (
     <div>
@@ -231,12 +232,18 @@ export function EpochWaterfall({ distribution: d }: EpochWaterfallProps) {
           }}
         >
           <span style={{ fontSize: 13, fontWeight: 600, color: T.tPri }}>Chain verifiable share of gross</span>
-          <span style={{ ...MONO, fontSize: 16, color: T.okFg }}>{fmtRatioPct(d.chainVerifiableRatio, 1)}</span>
+          {d.chainVerifiableRatio === null ? (
+            <NotMeasured size="sm" />
+          ) : (
+            <span style={{ ...MONO, fontSize: 16, color: T.okFg }}>{fmtRatioPct(d.chainVerifiableRatio, 1)}</span>
+          )}
         </div>
-        <ProgressBar
-          ratio={d.chainVerifiableRatio}
-          label={`Chain verifiable share of gross received in epoch ${d.epoch}`}
-        />
+        {d.chainVerifiableRatio === null ? null : (
+          <ProgressBar
+            ratio={d.chainVerifiableRatio}
+            label={`Chain verifiable share of gross received in epoch ${d.epoch}`}
+          />
+        )}
         <p style={{ margin: "10px 0 0", fontSize: 12, color: T.tSec, lineHeight: 1.55 }}>
           Chain verified money is HCOW spent in game and settled on {PROTOCOL.CHAIN_NAME}. The remainder arrives
           off chain and is attested by a published payout statement paired with the on-chain deposit that carried
@@ -248,9 +255,11 @@ export function EpochWaterfall({ distribution: d }: EpochWaterfallProps) {
       <div style={{ ...MONO, fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: T.tSec, marginBottom: 6 }}>
         Money received
       </div>
-      {d.revenue.map((line) => (
-        <RevenueLineRow key={`${line.origin}-${line.cls}`} line={line} />
-      ))}
+      {d.revenue === null ? (
+        <Row label="Line items pending" value="—" indent />
+      ) : (
+        d.revenue.map((line) => <RevenueLineRow key={`${line.origin}-${line.cls}`} line={line} />)
+      )}
       <Row label="Gross received" value={fmtUsdt(d.grossReceivedUsdt)} strong />
 
       <Divider space={12} />
@@ -258,7 +267,9 @@ export function EpochWaterfall({ distribution: d }: EpochWaterfallProps) {
       <div style={{ ...MONO, fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: T.tSec, marginBottom: 6 }}>
         Direct costs · not subject to the cap
       </div>
-      {directLines.length === 0 ? (
+      {directLines === null ? (
+        <Row label="Line items pending" value="—" indent />
+      ) : directLines.length === 0 ? (
         <Row label="No direct costs recorded" value={fmtUsdt(0)} indent />
       ) : (
         directLines.map((line) => <CostRow key={line.category} line={line} />)
@@ -271,7 +282,9 @@ export function EpochWaterfall({ distribution: d }: EpochWaterfallProps) {
       <div style={{ ...MONO, fontSize: 11, letterSpacing: "0.1em", textTransform: "uppercase", color: T.tSec, marginBottom: 6 }}>
         Operating costs · capped at {PROTOCOL.OPEX_CAP_PCT}% of net revenue
       </div>
-      {opexLines.length === 0 ? (
+      {opexLines === null ? (
+        <Row label="Line items pending" value="—" indent />
+      ) : opexLines.length === 0 ? (
         <Row label="No operating costs recorded" value={fmtUsdt(0)} indent />
       ) : (
         opexLines.map((line) => <CostRow key={line.category} line={line} />)

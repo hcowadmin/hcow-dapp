@@ -339,7 +339,8 @@ export const mockAdapter: IHcowAdapter = {
   },
 
   async getPoolStats() {
-    return { ...store.pool, revenue30dByOrigin: store.pool.revenue30dByOrigin.map((r) => ({ ...r })) };
+    // adapter v0.4.1: the field is nullable ("not measured"). The mock always has it.
+    return { ...store.pool, revenue30dByOrigin: store.pool.revenue30dByOrigin?.map((r) => ({ ...r })) ?? null };
   },
 
   async getNetworkStats() {

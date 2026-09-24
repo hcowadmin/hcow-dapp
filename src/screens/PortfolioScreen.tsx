@@ -118,7 +118,15 @@ export function PortfolioScreen({
     return { bonded, staked };
   }, [walletKey], canRead);
 
-  const history = useAsync<Transaction[]>(() => adapter.getTxHistory(filter), [walletKey, filter], canRead);
+  // Wrapped so that "no result yet" (data === null) cannot be confused with
+  // "the index answered null" (data.rows === null). useAsync reports
+  // { data: null, loading: false } for one render when canRead turns true,
+  // and that frame must read as loading, not as "History unavailable".
+  const history = useAsync<{ rows: Transaction[] | null }>(
+    async () => ({ rows: await adapter.getTxHistory(filter) }),
+    [walletKey, filter],
+    canRead,
+  );
 
   useErrorToast(positions.error, pushToast);
   useErrorToast(history.error, pushToast);
@@ -154,7 +162,8 @@ export function PortfolioScreen({
   }
 
   const pos = positions.data;
-  const rows = history.data;
+  // undefined: no settled result yet. null: index unavailable or the read failed.
+  const rows: Transaction[] | null | undefined = history.error ? null : history.data ? history.data.rows : undefined;
 
   return (
     <div style={{ display: "grid", gap: 32 }}>
@@ -304,8 +313,15 @@ export function PortfolioScreen({
 
         <div id="tx-panel" role="tabpanel" aria-labelledby={`txtab-${filter}`} tabIndex={0}>
           <Card padding={16}>
-            {history.loading || rows === null ? (
+            {history.loading || rows === undefined ? (
               <LoadingBlock label="Loading transaction history" rows={6} />
+            ) : rows === null ? (
+              // Index not configured or unreadable, or the read failed
+              // (adapter v0.4.2, audit 6 L-8). Not "no transactions".
+              <EmptyState
+                title="History unavailable"
+                body="The transaction index is not available. This is not a statement that there are no transactions. Balances above are read directly from the chain."
+              />
             ) : rows.length === 0 ? (
               <EmptyState
                 title="No transactions yet"
