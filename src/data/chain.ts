@@ -20,13 +20,12 @@
  * it (adapter v0.4.2), and
  * every such field is listed in CHAIN_ADAPTER_GAPS below so the UI, and
  * anyone reading a screenshot, can tell a real zero from a missing one.
- * Not yet converted: getBurnStats still reports 0 for burnedToday and the
- * lifetime deduction total for last30dGamePaymentBurn when the index is
- * unavailable (audit 6, M-4).
+ * The burn figures and the rolling windows are read from the contracts
+ * (adapter v0.4.6): the burn address's balance, and the settlement records.
  *
  * The remaining gaps are genuinely off-chain and need the indexer:
- *   revenue and cost line items, the rolling gross-received windows, burn
- *   windows, transaction history, every APR figure, and the settlement tx hash.
+ *   revenue and cost line items, transaction history, every APR figure, and
+ *   the settlement tx hash.
  * =============================================================================
  */
 
@@ -74,7 +73,6 @@ import { ERC20_ABI, FAUCET_ABI, LEDGER_ABI, PROFIT_SHARE_ABI, STAKING_ABI } from
 import {
   eventsForAccount,
   indexerConfigured,
-  revenueWindows,
   settlementForEpoch,
   type ChainEventRow,
 } from "./indexer";
@@ -506,6 +504,34 @@ async function hcowToSpend(owner: string, amount: Amount): Promise<bigint> {
 }
 
 /**
+ * The deduction limits the page states are the ones a user acknowledges before
+ * a first bond, and are repeated in the risk notice on every bond. Refuse,
+ * before anything is sent, when the contract says otherwise (audit 6, H-8:
+ * the page said 10% per 7-day epoch for a contract that caps a settlement at
+ * 2%). Read once per page load; they are constants in the contract.
+ */
+let deductionLimitsChecked = false;
+async function assertDeductionLimits(): Promise<void> {
+  if (deductionLimitsChecked) return;
+  const [perSettlement, perWindow, windowSec] = await read(() => Promise.all([
+    reader.profitShare.MAX_DEDUCT_PPM() as Promise<bigint>,
+    reader.profitShare.MAX_DECAY_PER_WINDOW_PPM() as Promise<bigint>,
+    reader.profitShare.DECAY_WINDOW() as Promise<bigint>,
+  ]));
+  const d = PROTOCOL.DEDUCTION;
+  if (
+    Number(perSettlement) !== d.PER_SETTLEMENT_PPM ||
+    Number(perWindow) !== d.PER_WINDOW_PPM ||
+    Number(windowSec) !== d.WINDOW_DAYS * 86_400
+  ) {
+    const msg =
+      "The deduction limits on this page do not match the contract, so bonding is disabled here. Nothing was sent.";
+    throw withDetail(new AdapterError("UNKNOWN_ERROR", msg), msg);
+  }
+  deductionLimitsChecked = true;
+}
+
+/**
  * Run the step after an approval. If it fails, the error says the approval
  * already happened (audit 6, H-4): "Nothing was sent" was false there, and an
  * allowance for the amount stays on chain until the next attempt uses it.
@@ -585,16 +611,17 @@ async function epochBase(): Promise<EpochBase> {
  */
 async function settlementWindows(): Promise<{
   gross24h: number; gross7d: number; gross30d: number; participants30d: number;
+  deducted24h: number; deducted30d: number;
 } | null> {
   const DAY = 86_400_000;
   const MAX_IN_30D = 5;
   try {
     const next = Number((await reader.profitShare.nextEpoch()) as bigint);
     const now = Date.now();
-    let gross24h = 0, gross7d = 0, gross30d = 0, participants30d = 0, inside = 0;
+    let gross24h = 0, gross7d = 0, gross30d = 0, participants30d = 0, deducted24h = 0, deducted30d = 0, inside = 0;
     for (let e = next - 1; e >= 0; e--) {
       const s = (await reader.profitShare.getSettlement(e)) as {
-        grossReceivedUsdt: bigint; participantsUsdt: bigint; settledAt: bigint;
+        grossReceivedUsdt: bigint; participantsUsdt: bigint; hcowDeducted: bigint; settledAt: bigint;
       };
       const at = secToMs(s.settledAt);
       // A record with no time, or one older than 30 days: nothing older can be inside either.
@@ -602,12 +629,17 @@ async function settlementWindows(): Promise<{
       if (++inside > MAX_IN_30D) return null;
       const age = Math.max(0, now - at);   // a record slightly "ahead" of this clock is brand new
       const gross = toAmount(s.grossReceivedUsdt);
+      const deducted = toAmount(s.hcowDeducted);
       gross30d += gross;
       participants30d += toAmount(s.participantsUsdt);
+      deducted30d += deducted;
       if (age < 7 * DAY) gross7d += gross;
-      if (age < DAY) gross24h += gross;
+      if (age < DAY) {
+        gross24h += gross;
+        deducted24h += deducted;
+      }
     }
-    return { gross24h, gross7d, gross30d, participants30d };
+    return { gross24h, gross7d, gross30d, participants30d, deducted24h, deducted30d };
   } catch {
     return null;
   }
@@ -925,34 +957,49 @@ export const chainAdapter: IHcowAdapter = {
   },
 
   async getBurnStats(): Promise<BurnStats> {
-    const [supply, deducted, windows] = await read(() => Promise.all([
+    // The only burn is HCOWProfitShare sending HCOW to its BURN_ADDRESS
+    // (deductions at settlement, forfeits on exit). A transfer to 0x...dEaD
+    // does not reduce totalSupply(), so the burned figure is that address's
+    // balance. It used to be 200,000,000 minus totalSupply(), which stays 0
+    // however much is deducted (audit 6, M-3), and HCOWToken's published
+    // source says to read balanceOf(0xdEaD) instead.
+    // HCOWToken is also ERC20Burnable: a holder's own burn() lowers
+    // totalSupply() and never reaches the burn address, so it is counted as
+    // INITIAL_SUPPLY minus totalSupply() when the token publishes
+    // INITIAL_SUPPLY (review F5). The testnet stand-in token does not; then
+    // only the burn address is counted and the base is totalSupply().
+    const burnAddress = await read(() => reader.profitShare.BURN_ADDRESS() as Promise<string>);
+    const [supply, deadWei, initial, w] = await read(() => Promise.all([
       reader.hcow.totalSupply() as Promise<bigint>,
-      reader.profitShare.totalHcowDeducted() as Promise<bigint>,
-      revenueWindows(),
+      reader.hcow.balanceOf(burnAddress) as Promise<bigint>,
+      // null only when the token has no such getter. A network failure is a
+      // failed read, not "no getter": swallowing it would publish a smaller
+      // burned figure over a different base (re-review R4).
+      (reader.hcow.INITIAL_SUPPLY() as Promise<bigint>).catch((e: unknown) => {
+        const err = e as ProviderErrorish;
+        // The node answered that the call reverts (no such function), or the
+        // address returned nothing to decode. ethers labels a node outage on
+        // eth_call CALL_EXCEPTION too, so the node's own message decides.
+        const nodeSaid = err.info?.error?.message ?? "";
+        if (err.code === "BAD_DATA") return null;
+        if (err.code === "CALL_EXCEPTION" && (err.data != null || /revert/i.test(nodeSaid))) return null;
+        throw e;
+      }),
+      settlementWindows(),
     ]));
-    // A row whose numbers do not parse is treated as no row (audit 6, M-2):
-    // BigInt("1.5") threw and took the whole panel down.
-    const w0 = windows?.[0] ?? null;
-    const burned24 = w0 ? weiFromIndex(w0.burned_24h) : null;
-    const burned30 = w0 ? weiFromIndex(w0.burned_30d) : null;
-    const w = burned24 !== null && burned30 !== null ? { burned24, burned30 } : null;
-    const circulating = toAmount(supply);
-    // HCOW is fixed supply with no mint, so anything missing from totalSupply
-    // was burned. This holds for the profit-share deduction burn and for any
-    // other burn path, which is why it is derived rather than read from a
-    // per-path counter.
-    const burned = Math.max(0, PROTOCOL.TOKEN_TOTAL_SUPPLY - circulating);
+    const selfBurnedWei = initial !== null && initial > supply ? initial - supply : 0n;
+    const burned = toAmount(deadWei + selfBurnedWei);
+    const supplyBaseHcow = toAmount(initial ?? supply);
 
     return {
       totalBurnedHcow: burned,
-      burnedToday: w ? toAmount(w.burned24) : 0,
-      // Deduction happens at settlement, so the in-flight epoch has burned
-      // nothing yet by construction. This is a real zero, not a missing one.
-      burnedThisEpoch: 0,
-      percentOfSupply: (burned / PROTOCOL.TOKEN_TOTAL_SUPPLY) * 100,
-      // No transaction-fee burn path exists on this token. Structurally zero.
-      last30dTxFeeBurn: 0,
-      last30dGamePaymentBurn: w ? toAmount(w.burned30) : toAmount(deducted),
+      supplyBaseHcow,
+      countsHolderBurns: initial !== null,
+      percentOfSupply: supplyBaseHcow > 0 ? (burned / supplyBaseHcow) * 100 : 0,
+      // From the settlement records, like the gross windows. The 30d figure
+      // used to fall back to the lifetime total under a "30d" label (M-4).
+      deductedAtSettlement24h: w ? w.deducted24h : null,
+      deductedAtSettlement30d: w ? w.deducted30d : null,
     };
   },
 
@@ -1117,6 +1164,7 @@ export const chainAdapter: IHcowAdapter = {
 
   async bond(amount: Amount): Promise<TxResult> {
     const signer = await requireSigner();
+    await assertDeductionLimits();
     const wei = await hcowToSpend(await signer.getAddress(), amount);
     const approval = await ensureAllowance(signer, DEPLOYMENT.addresses.profitShare, wei);
 
@@ -1376,15 +1424,11 @@ function toTransaction(row: ChainEventRow, type: TxType): Transaction | null {
 }
 
 /**
- * A wei amount from the index, else null. Event arguments are stored as
- * decimal strings; the rollup views are Postgres numeric sums, which PostgREST
- * may send as JSON numbers. Anything that is not a non-negative integer in
- * either form is not an amount.
+ * A wei amount from the index, else null. The indexer stores event arguments
+ * as decimal strings; anything else is not an amount.
  */
 function weiFromIndex(v: unknown): bigint | null {
-  if (typeof v === "string") return /^[0-9]+$/.test(v) ? BigInt(v) : null;
-  if (typeof v === "number") return Number.isInteger(v) && v >= 0 ? BigInt(v) : null;
-  return null;
+  return typeof v === "string" && /^[0-9]+$/.test(v) ? BigInt(v) : null;
 }
 
 // ============================================================

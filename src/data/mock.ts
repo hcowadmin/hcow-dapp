@@ -164,11 +164,11 @@ const store: Store = {
   },
   burn: {
     totalBurnedHcow: 1_846_200,
-    burnedToday: 8_420,
-    burnedThisEpoch: 52_180,
+    supplyBaseHcow: PROTOCOL.TOKEN_TOTAL_SUPPLY,
+    countsHolderBurns: true,
     percentOfSupply: (1_846_200 / PROTOCOL.TOKEN_TOTAL_SUPPLY) * 100,
-    last30dTxFeeBurn: 108_400,
-    last30dGamePaymentBurn: 214_900,
+    deductedAtSettlement24h: 8_420,
+    deductedAtSettlement30d: 214_900,
   },
   bonded: {
     status: "active",

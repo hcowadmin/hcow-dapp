@@ -13,7 +13,7 @@
 
 import type { ReactNode } from "react";
 import { T } from "../config/tokens";
-import { PROTOCOL, txUrl } from "../config/constants";
+import { DEDUCTION_PER_SETTLEMENT_PCT, PROTOCOL, txUrl } from "../config/constants";
 import type { CostCategory, CostLine, EpochDistribution, RevenueLine, RevenueOrigin } from "../data";
 import { fmtDate, fmtHcow, fmtRatioPct, fmtUsdt, shortHash } from "../lib/format";
 import { Badge, Divider, ExtLink, MONO, NotMeasured, ProgressBar, toneColors } from "./ui";
@@ -37,7 +37,10 @@ export function originLabel(origin: RevenueOrigin): string {
     case "other":
       return "Other game revenue";
     default:
-      return "Table game fees";
+      // Any origin this build does not know. It used to read "Table game
+      // fees", a gambling term, for every unrecognised origin (audit 6,
+      // public promise).
+      return "Unclassified revenue";
   }
 }
 
@@ -368,7 +371,7 @@ export function EpochWaterfall({ distribution: d }: EpochWaterfallProps) {
           sign={d.totalHcowDeducted > 0 ? "minus" : "none"}
           note={
             d.distributableProfitUsdt > 0
-              ? `Metered by RNG and VRF usage, capped at ${PROTOCOL.DEDUCTION_CAP_PCT}% of a bonded balance per epoch.`
+              ? `Set at each settlement from ecosystem usage. The contract caps it at ${DEDUCTION_PER_SETTLEMENT_PCT}% of the bonded pool per settlement.`
               : "No distributable profit this epoch, so no deduction ran."
           }
         />

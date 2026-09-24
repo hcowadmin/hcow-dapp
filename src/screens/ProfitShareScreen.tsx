@@ -13,7 +13,7 @@ import { useState } from "react";
 import { adapter } from "../data";
 import type { BondedPosition, Epoch, PoolStats, TxResult, WalletState } from "../data";
 import { T } from "../config/tokens";
-import { LIMITS, PROTOCOL } from "../config/constants";
+import { DEDUCTION_PER_SETTLEMENT_PCT, LIMITS, PROTOCOL } from "../config/constants";
 import { presentError } from "../lib/errors";
 import { fmtAmount, fmtCountdown, fmtDate, fmtHcow, fmtHcowExact, fmtInt, fmtRatioPct, fmtUsdt, shortHash } from "../lib/format";
 import { useAsync } from "../hooks/useAsync";
@@ -160,9 +160,9 @@ export function ProfitShareScreen({
     }
     if (amountInvalid) return "Enter an amount greater than zero.";
     if (isDeposit) {
-      return `Deducted by up to ${PROTOCOL.DEDUCTION_CAP_PCT}% per ${PROTOCOL.EPOCH_DAYS}-day epoch, based on ecosystem usage.`;
+      return `Deducted by up to ${DEDUCTION_PER_SETTLEMENT_PCT}% at each settlement, based on ecosystem usage.`;
     }
-    return `Requesting starts a ${PROTOCOL.UNBOND_COOLDOWN_DAYS}-day cooldown. You can cancel it at any time before it ends.`;
+    return `Requesting starts a ${PROTOCOL.UNBOND_COOLDOWN_DAYS}-day cooldown. You can cancel it until you withdraw.`;
   }
 
   return (
@@ -372,7 +372,7 @@ export function ProfitShareScreen({
                 </div>
               </Card>
 
-              <Card kicker={`Claimable ${PROTOCOL.REWARD_CURRENCY}`} title="Your share of the last settlement">
+              <Card kicker={`Claimable ${PROTOCOL.REWARD_CURRENCY}`} title="Your unclaimed share">
                 <div style={{ ...MONO, fontSize: 32, fontWeight: 500, color: pos.pendingClaimUsdt > 0 ? T.okFg : T.tSec }}>
                   {fmtAmount(pos.pendingClaimUsdt)}
                   <span style={{ fontSize: 14, color: T.tSec, marginLeft: 6 }}>{PROTOCOL.REWARD_CURRENCY}</span>
@@ -400,7 +400,11 @@ export function ProfitShareScreen({
       <Modal
         open={modal === "bond" || modal === "topup"}
         title={modal === "topup" ? "Top up your bond" : "Bond HCOW"}
-        description="Bonded HCOW takes effect from the next epoch snapshot."
+        // New shares absorb deduction from the settlement that closes this
+        // epoch, and earn only from the one after (HCOWProfitShare, new
+        // shares). "Takes effect from the next epoch" read as if the risk
+        // started later than it does (review 2026-09-25, F4).
+        description="Bonded HCOW can be deducted from the next settlement on. It shares in profit from the settlement after that."
         onClose={closeModal}
         busy={busy}
         footer={
@@ -415,7 +419,7 @@ export function ProfitShareScreen({
                 void submit(
                   () => (modal === "topup" ? adapter.topUpBond(parsed) : adapter.bond(parsed)),
                   modal === "topup" ? "Top-up confirmed" : "Bond confirmed",
-                  `${fmtHcowExact(parsed)} is bonded from the next epoch.`,
+                  `${fmtHcowExact(parsed)} is bonded. It can be deducted from the next settlement and shares in profit from the one after.`,
                 )
               }
             >
@@ -442,7 +446,8 @@ export function ProfitShareScreen({
             label="After this transaction"
             value={pos && amountReady ? fmtHcow(pos.bondedAmount + parsed) : "—"}
           />
-          <KV label="Takes effect" value="Next epoch snapshot" />
+          <KV label="Deductible from" value="The next settlement" />
+          <KV label="Shares in profit from" value="The settlement after that" />
           <KV label="Cooldown to exit" value={`${PROTOCOL.UNBOND_COOLDOWN_DAYS} days`} />
         </div>
 
@@ -463,8 +468,9 @@ export function ProfitShareScreen({
           }}
         >
           <strong style={{ color: T.warnFg }}>This is not a deposit product.</strong> Bonded HCOW can be deducted
-          by up to {PROTOCOL.DEDUCTION_CAP_PCT}% per {PROTOCOL.EPOCH_DAYS}-day epoch based on ecosystem usage, and
-          deductions are permanent. In an epoch with no distributable profit, no deduction runs.
+          by up to {DEDUCTION_PER_SETTLEMENT_PCT}% at each settlement, and by at most about{" "}
+          {PROTOCOL.DEDUCTION.ROLLING_30D_MAX_PCT}% over any {PROTOCOL.DEDUCTION.WINDOW_DAYS} days, based on ecosystem
+          usage. Deductions are permanent. In an epoch with no distributable profit, no deduction runs.
         </div>
 
         {needsAck ? (
@@ -473,7 +479,7 @@ export function ProfitShareScreen({
             checked={ack}
             onChange={setAck}
             disabled={busy}
-            label={`I understand that my bonded balance can be reduced by up to ${PROTOCOL.DEDUCTION_CAP_PCT}% per epoch and that deductions are permanent.`}
+            label={`I understand that my bonded balance can be reduced by up to ${DEDUCTION_PER_SETTLEMENT_PCT}% at each settlement, and by at most about ${PROTOCOL.DEDUCTION.ROLLING_30D_MAX_PCT}% over any ${PROTOCOL.DEDUCTION.WINDOW_DAYS} days, and that deductions are permanent.`}
           />
         ) : null}
       </Modal>
@@ -522,8 +528,11 @@ export function ProfitShareScreen({
           <KV label="Ready to withdraw" value="Set on chain when the request confirms" />
         </div>
         <p style={{ margin: 0, fontSize: 13, color: T.tSec, lineHeight: 1.6 }}>
-          The requested amount leaves the bonded pool, so it stops earning a share and stops being deductible. You
-          can cancel the request at any time before the cooldown ends, which returns it to your bonded balance.
+          {/* The contract charges a pending unbond for at most one settlement, the
+              first after the request. "Stops being deductible" was not true. */}
+          The requested amount leaves the bonded pool, so it stops earning a share. It can still be charged at the
+          first settlement after the request, and never after that. You can cancel the request until you withdraw,
+          which returns what remains of it to your bonded balance.
         </p>
       </Modal>
 

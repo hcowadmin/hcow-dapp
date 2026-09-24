@@ -93,6 +93,12 @@
  *     - getWalletState returns disconnected, never the previous address, when
  *       the wallet cannot be read; chainId is null whenever connected is false.
  *
+ * 19. v0.4.6 (audit 6, H-8, M-3, M-4): BurnStats describes the burn that exists
+ *     (see the type). bond() refuses, before anything is sent, when the
+ *     deduction limits the page states differ from the contract's, because
+ *     those numbers are what the first-bond acknowledgement asks a user to
+ *     accept.
+ *
  * ---------------------------------------------------------------------------
  * DISTRIBUTION POLICY  v0.4   (read before implementing any money field)
  * ---------------------------------------------------------------------------
@@ -512,16 +518,47 @@ export interface TxResult {
 // BURN  (supply level, never a user balance)
 // ============================================================
 
+/**
+ * v0.4.6 (audit 6, M-3 and M-4). The only burn in the system is HCOW sent to
+ * the burn address by HCOWProfitShare: deductions at settlement, and HCOW
+ * forfeited by a pending position when it leaves. HCOWToken says so in its
+ * published source and says the 20% fee burn and 50% native payment burn of
+ * older documents are not implemented anywhere. (A holder can still burn
+ * their own HCOW with ERC20Burnable.burn(); that is counted too.) The fields that described
+ * them (last30dTxFeeBurn, last30dGamePaymentBurn under a "50%" label,
+ * burnedThisEpoch) are removed rather than reported as zero.
+ */
 export interface BurnStats {
+  /**
+   * balanceOf(BURN_ADDRESS), plus INITIAL_SUPPLY minus totalSupply() when the
+   * token publishes INITIAL_SUPPLY. The protocol burns by transfer to 0x...dEaD,
+   * which does not reduce totalSupply(), so the old 200,000,000 minus
+   * totalSupply() read 0 after any number of deductions (M-3). HCOWToken is
+   * also ERC20Burnable, and a holder's own burn() does reduce totalSupply();
+   * the second term counts that (review F5).
+   */
   totalBurnedHcow: Amount;
-  burnedToday: Amount;
-  burnedThisEpoch: Amount;
-  /** Derived as totalBurnedHcow / totalSupply * 100. Never hardcode. */
+  /**
+   * The supply percentOfSupply is taken of: the token's INITIAL_SUPPLY when it
+   * publishes one (HCOWToken does), otherwise totalSupply() as read. Never a
+   * hardcoded 200,000,000.
+   */
+  supplyBaseHcow: Amount;
+  /**
+   * Whether totalBurnedHcow includes holders' own burn() calls. False on a
+   * token without INITIAL_SUPPLY (the testnet stand-in), where only the burn
+   * address can be counted.
+   */
+  countsHolderBurns: boolean;
+  /** totalBurnedHcow / supplyBaseHcow * 100. */
   percentOfSupply: Percent;
-  /** Burned from the 20% transaction fee share, last 30 days. */
-  last30dTxFeeBurn: Amount;
-  /** Burned from the 50% native in-game payment share, last 30 days. */
-  last30dGamePaymentBurn: Amount;
+  /**
+   * HCOW deducted by settlements recorded in the last 24 hours / 30 days,
+   * summed from the contract's settlement records. null when those reads
+   * fail: never the lifetime total under a 30-day label (M-4).
+   */
+  deductedAtSettlement24h: Amount | null;
+  deductedAtSettlement30d: Amount | null;
 }
 
 // ============================================================

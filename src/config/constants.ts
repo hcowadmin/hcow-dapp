@@ -19,8 +19,29 @@ export const PROTOCOL = {
   EPOCH_MS: 7 * 24 * 60 * 60 * 1000,
 
   // ---- Profit Share (Bonded Deposit) ----
-  /** Max share of bonded balance deductible in one epoch. */
-  DEDUCTION_CAP_PCT: 10,
+  /**
+   * The deduction limits as HCOWProfitShare enforces them. These are the
+   * numbers the risk notice states and the first-bond acknowledgement asks a
+   * user to accept, so bond() checks the three contract values against them
+   * before anything is signed and refuses on a mismatch (audit 6, H-8). They
+   * used to read "10% per 7-day epoch"; the contract caps a settlement at 2%.
+   */
+  DEDUCTION: {
+    /** MAX_DEDUCT_PPM: the most one settlement can deduct, in parts per million of the bonded pool. */
+    PER_SETTLEMENT_PPM: 20_000,
+    /** MAX_DECAY_PER_WINDOW_PPM: the most one fixed decay window can deduct. */
+    PER_WINDOW_PPM: 30_000,
+    /** DECAY_WINDOW, in days. */
+    WINDOW_DAYS: 30,
+    /**
+     * Worst case over ANY 30 days, compounded, as the contract's own comment
+     * derives it from the three values above (two fixed windows can be packed
+     * back to back: 59,999 ppm summed). The contract asks for this figure to be
+     * quoted rather than the per-window 3%. Valid only while the three values
+     * above match the contract, which bond() enforces.
+     */
+    ROLLING_30D_MAX_PCT: "5.87",
+  },
   UNBOND_COOLDOWN_DAYS: 7,
   UNBOND_COOLDOWN_MS: 7 * 24 * 60 * 60 * 1000,
 
@@ -39,12 +60,6 @@ export const PROTOCOL = {
 
   /** Deductible operating cost ceiling, as a share of net revenue. */
   OPEX_CAP_PCT: 40,
-
-  // ---- Burn (supply level, never a user balance) ----
-  BURN: {
-    TX_FEE_PCT: 20,
-    NATIVE_GAME_PCT: 50,
-  },
 
   // ---- Token ----
   TOKEN_TOTAL_SUPPLY: 200_000_000,
@@ -98,6 +113,9 @@ export const EXTERNAL_LINKS = {
   LEARN_BONDED_DEPOSIT: "https://hashcow.gitbook.io/hashcow-docs-2",
   METAMASK_INSTALL: "https://metamask.io/download/",
 } as const;
+
+/** The per-settlement deduction cap as a percent, for copy (2). */
+export const DEDUCTION_PER_SETTLEMENT_PCT = PROTOCOL.DEDUCTION.PER_SETTLEMENT_PPM / 10_000;
 
 export const txUrl = (hash: string) => `${PROTOCOL.BSCSCAN_BASE}/tx/${hash}`;
 export const addressUrl = (addr: string) => `${PROTOCOL.BSCSCAN_BASE}/address/${addr}`;

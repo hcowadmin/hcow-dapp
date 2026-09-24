@@ -46,9 +46,7 @@ The `[I]` indexer methods and `[B]` backend methods have nothing behind them
 yet, so they return null rather than an invented number. null means "not
 measured": the UI shows a dash and "Measurement pending" (or "Forecast pending",
 or "Line items pending"), never 0 and never "nothing arrived". 0 and an empty
-list keep their plain meaning: measured, and nothing there. Not converted yet:
-without the index, the burn panel still shows 0 for today and the lifetime
-deduction total under its 30-day label.
+list keep their plain meaning: measured, and nothing there.
 Each one is named in the `CHAIN_ADAPTER_GAPS` export in `chain.ts`, which is
 the list to work through, in this order:
 
@@ -59,14 +57,24 @@ the list to work through, in this order:
 3. `epoch_settlement` rows in transaction history, which need the indexer to
    replay each account's share history to attribute a settlement per user.
 
-Transaction history, the burn windows and the settlement transaction hash
-come from the event index. Set
+Transaction history and the settlement transaction hash come from the event
+index. Set
 `VITE_INDEXER_URL` and `VITE_INDEXER_KEY` to the Supabase project URL and its
 anon key. Leave them empty and the app still works: transaction history then
 reports null, shown as "History unavailable", and the settlement transaction
-link is left out. The gross-received and paid-to-participants windows do not
-use the index: they are summed from the contract's own settlement records. The
-burn windows still do (see above).
+link is left out. The gross-received, paid-to-participants and deducted-at-settlement
+windows do not use the index: they are summed from the contract's own
+settlement records. The burned total is the balance of the contract's
+`BURN_ADDRESS` (deductions and unbond forfeits are sent there, which does not
+reduce `totalSupply()`), plus `INITIAL_SUPPLY - totalSupply()` for HCOW that
+holders burned themselves with `burn()`. There is no transaction-fee burn (see
+`HCOWToken.sol`).
+
+The deduction limits the app states (2% per settlement, about 5.87% over any 30
+days) are in `PROTOCOL.DEDUCTION`. `bond()` compares them with the contract's
+`MAX_DEDUCT_PPM`, `MAX_DECAY_PER_WINDOW_PPM` and `DECAY_WINDOW` before anything
+is signed and refuses on a mismatch, because they are the numbers the first-bond
+acknowledgement asks a user to accept.
 
 The contract side is closed. `participantCount` and `lifetimeOf(account)` were
 added to `HCOWProfitShare` for exactly these fields, so participant count,

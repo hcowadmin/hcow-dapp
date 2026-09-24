@@ -1,10 +1,13 @@
 /**
  * HCOW dApp — Event index client
  *
- * Reads the `chain_events` table and its two rollup views over Supabase's
- * REST layer. Plain fetch rather than the Supabase SDK: this is four read
- * queries, and pulling in a client library for them would add more to the
- * bundle than the whole adapter.
+ * Reads the `chain_events` table over Supabase's REST layer. The rollup views
+ * (epoch_settlements, revenue_windows) are no longer read: settlements and the
+ * rolling windows come from the contract itself (adapter v0.4.6).
+ *
+ * Plain fetch rather than the Supabase SDK: this is two read queries, and
+ * pulling in a client library for them would add more to the bundle than the
+ * whole adapter.
  *
  * Everything here is optional. If `VITE_INDEXER_URL` is not set, or the
  * request fails, each function returns null and the adapter reports the
@@ -55,25 +58,6 @@ export interface ChainEventRow {
   args: Record<string, string>;
 }
 
-export interface SettlementRow {
-  epoch: number;
-  settled_at: string;
-  tx_hash: string;
-  gross_received_usdt: string;
-  participants_usdt: string;
-  hcow_deducted: string;
-}
-
-/** Postgres numeric sums. PostgREST may send them as strings or as JSON numbers. */
-export interface WindowRow {
-  gross_24h: string | number;
-  gross_7d: string | number;
-  gross_30d: string | number;
-  participants_30d: string | number;
-  burned_24h: string | number;
-  burned_30d: string | number;
-}
-
 /** Most recent first. `limit` is a hard cap, not a page size: there is no UI for paging yet. */
 export const eventsForAccount = (address: string, limit = 100) =>
   query<ChainEventRow>(
@@ -100,6 +84,3 @@ export const settlementForEpoch = (epoch: number) =>
       `&contract=ilike.${DEPLOYMENT.addresses.profitShare}` +
       `&epoch=eq.${epoch}&order=block_number.desc&limit=1`
   );
-
-export const revenueWindows = () =>
-  query<WindowRow>(`revenue_windows?chain_id=eq.${DEPLOYMENT.chainId}&limit=1`);

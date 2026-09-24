@@ -264,7 +264,7 @@ export function PortfolioScreen({
               value={fmtAmount(pos.bonded.lifetimeDeductedHcow)}
               unit="HCOW"
               tone="warn"
-              hint="Permanently removed from your bonded balance."
+              hint="Permanently removed from your bonded balance. At most this much: the contract rounds each share up."
             />
             <Metric
               label="HCOW rewards earned"
@@ -325,7 +325,10 @@ export function PortfolioScreen({
             ) : rows.length === 0 ? (
               <EmptyState
                 title="No transactions yet"
-                body="Bonding, staking, claims and automatic epoch settlements all appear here, each with a link to BscScan."
+                // Settlement rows are not produced yet (CHAIN_ADAPTER_GAPS), so the
+                // old promise that "automatic epoch settlements" appear here was
+                // false (audit 6, L-18).
+                body="Bonding, staking and claims appear here, each with a link to BscScan. Settlement payouts are not listed here yet; your unclaimed USDT is shown under Profit Share."
               />
             ) : (
               <div style={{ display: "grid", gap: 8 }}>

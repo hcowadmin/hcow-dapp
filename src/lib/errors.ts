@@ -74,7 +74,10 @@ const MAP: Record<AdapterErrorCode, ErrorPresentation> = {
   UNBOND_COOLDOWN_ACTIVE: {
     tone: "warning",
     title: "Cooldown in progress",
-    body: "A withdrawal request is already running. Wait for it to finish or cancel it first.",
+    // Shown when a withdrawal is attempted before the cooldown ends. It used
+    // to say "cancel it first", and cancelling throws away the cooldown that
+    // has already elapsed (audit 6, M-9).
+    body: "The cooldown on your request has not finished yet. Withdraw once it ends. Your request is still in place.",
     keepModalOpen: false,
   },
   INVALID_REPRESENTATIVE: {

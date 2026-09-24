@@ -16,6 +16,10 @@ export const ERC20_ABI = [
   "function totalSupply() view returns (uint256)",
   "function decimals() view returns (uint8)",
   "function symbol() view returns (string)",
+  // HCOWToken's fixed initial supply. burn() lowers totalSupply below it. The
+  // testnet stand-in token has no such getter; the adapter then counts only
+  // the burn address.
+  "function INITIAL_SUPPLY() view returns (uint256)",
 ] as const;
 
 export const PROFIT_SHARE_ABI = [
@@ -25,6 +29,13 @@ export const PROFIT_SHARE_ABI = [
   "function GAME_COMPANY_BPS() view returns (uint16)",
   "function TEAM_BPS() view returns (uint16)",
   "function UNBOND_COOLDOWN() view returns (uint256)",
+  // Deduction limits (audit 6, H-8). bond() checks them against the copy the
+  // user acknowledges before anything is signed.
+  "function MAX_DEDUCT_PPM() view returns (uint32)",
+  "function MAX_DECAY_PER_WINDOW_PPM() view returns (uint32)",
+  "function DECAY_WINDOW() view returns (uint256)",
+  // Where deductions and exit forfeits are sent (audit 6, M-3).
+  "function BURN_ADDRESS() view returns (address)",
   // pool state
   "function totalBondedHcow() view returns (uint256)",
   "function totalShares() view returns (uint256)",

@@ -233,7 +233,7 @@ export function HomeScreen({ wallet, walletKey, canRead, pushToast, onNavigate, 
             tone="burn"
             hint={
               burn
-                ? `${fmtPct(burn.percentOfSupply, 2)} of ${fmtInt(PROTOCOL.TOKEN_TOTAL_SUPPLY)} HCOW supply. Supply level, not your balance.`
+                ? `${fmtPct(burn.percentOfSupply, 2)} of the ${fmtInt(burn.supplyBaseHcow)} HCOW supply. Supply level, not your balance.`
                 : undefined
             }
           />
@@ -303,7 +303,7 @@ export function HomeScreen({ wallet, walletKey, canRead, pushToast, onNavigate, 
               <KV
                 label="Deducted to date"
                 value={fmtHcow(pos.data.bonded.lifetimeDeductedHcow)}
-                sub="Permanent, metered by RNG and VRF usage."
+                sub="Permanent. At most this much: the contract rounds each share of a deduction up."
               />
               <div style={{ marginTop: 16 }}>
                 <Button variant="secondary" block onClick={() => onNavigate("profit")}>
@@ -354,25 +354,33 @@ export function HomeScreen({ wallet, walletKey, canRead, pushToast, onNavigate, 
         <Card>
           {burn ? (
             <AutoGrid min={220}>
-              <Metric label="Burned today" value={fmtAmount(burn.burnedToday, 0)} unit="HCOW" tone="burn" />
-              <Metric label="Burned this epoch" value={fmtAmount(burn.burnedThisEpoch, 0)} unit="HCOW" tone="burn" />
+              {/* Only the burn that exists (audit 6, M-4). The "Tx fee burn 20%" and
+                  "In-game burn 50%" rows described mechanisms HCOWToken says are
+                  not implemented anywhere, and the 30d figure fell back to the
+                  lifetime total. */}
               <Metric
-                label={`Tx fee burn · 30d (${PROTOCOL.BURN.TX_FEE_PCT}%)`}
-                value={fmtAmount(burn.last30dTxFeeBurn, 0)}
-                unit="HCOW"
+                label="Deducted at settlement · 24h"
+                value={burn.deductedAtSettlement24h === null ? <NotMeasured /> : fmtAmount(burn.deductedAtSettlement24h, 0)}
+                unit={burn.deductedAtSettlement24h === null ? undefined : "HCOW"}
+                tone="burn"
               />
               <Metric
-                label={`In-game burn · 30d (${PROTOCOL.BURN.NATIVE_GAME_PCT}%)`}
-                value={fmtAmount(burn.last30dGamePaymentBurn, 0)}
-                unit="HCOW"
+                label="Deducted at settlement · 30d"
+                value={burn.deductedAtSettlement30d === null ? <NotMeasured /> : fmtAmount(burn.deductedAtSettlement30d, 0)}
+                unit={burn.deductedAtSettlement30d === null ? undefined : "HCOW"}
+                tone="burn"
               />
             </AutoGrid>
           ) : (
             <LoadingBlock label="Loading burn statistics" rows={2} />
           )}
           <p style={{ margin: "16px 0 0", fontSize: 12, color: T.tSec, lineHeight: 1.6 }}>
-            Burning reduces total HCOW supply across the whole ecosystem. It is unrelated to any individual bonded
-            or staked balance.
+            HCOW deducted from the bonded pool at each settlement, and HCOW forfeited by a pending unbond when it is
+            withdrawn or cancelled, is sent to the burn address. Holders can also burn their own HCOW.{" "}
+            {burn && !burn.countsHolderBurns
+              ? "This deployment's token does not publish its initial supply, so the total above counts the burn address only."
+              : "Both are counted in the total above."}{" "}
+            There is no transaction-fee burn.
           </p>
         </Card>
       </section>

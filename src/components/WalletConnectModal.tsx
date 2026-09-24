@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import { adapter } from "../data";
 import type { WalletProvider } from "../data";
 import { T } from "../config/tokens";
-import { EXTERNAL_LINKS, PROTOCOL } from "../config/constants";
+import { DEDUCTION_PER_SETTLEMENT_PCT, EXTERNAL_LINKS, PROTOCOL } from "../config/constants";
 import { presentError } from "../lib/errors";
 import { Modal } from "./Modal";
 import { Button, Checkbox, ExtLink, MONO } from "./ui";
@@ -207,8 +207,9 @@ export function WalletConnectModal({ open, onClose, pushToast }: WalletConnectMo
       </div>
 
       <p style={{ margin: 0, fontSize: 12, color: T.tSec, lineHeight: 1.6 }}>
-        Bonded HCOW can be reduced by up to {PROTOCOL.DEDUCTION_CAP_PCT}% per {PROTOCOL.EPOCH_DAYS}-day epoch.
-        Staked HCOW is locked, and is not subject to deduction.
+        Bonded HCOW can be reduced by up to {DEDUCTION_PER_SETTLEMENT_PCT}% at each settlement, and by at most
+        about {PROTOCOL.DEDUCTION.ROLLING_30D_MAX_PCT}% over any {PROTOCOL.DEDUCTION.WINDOW_DAYS} days. Staked HCOW is
+        locked, and is not subject to deduction.
       </p>
 
       <div style={{ display: "flex", justifyContent: "flex-end" }}>

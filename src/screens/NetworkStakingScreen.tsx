@@ -154,7 +154,7 @@ export function NetworkStakingScreen({
     }
     if (amountInvalid) return "Enter an amount greater than zero.";
     if (isStake) return "Staked HCOW is locked, and is not subject to deduction. Rewards are paid in HCOW.";
-    return `Requesting starts a ${PROTOCOL.UNSTAKE_COOLDOWN_DAYS}-day cooldown. You can cancel it at any time before it ends.`;
+    return `Requesting starts a ${PROTOCOL.UNSTAKE_COOLDOWN_DAYS}-day cooldown. You can cancel it until you withdraw.`;
   }
 
   return (
@@ -357,7 +357,7 @@ export function NetworkStakingScreen({
                   <p style={{ margin: "10px 0 18px", fontSize: 13, color: T.tSec, lineHeight: 1.6 }}>
                     {pos.pendingRewardHcow > 0
                       ? "Claiming moves the rewards to your wallet. They do not compound automatically."
-                      : "No rewards accrued yet. They appear here as your representative produces blocks."}
+                      : "No rewards accrued yet. Rewards accrue per second while a funded reward period is running."}
                   </p>
                   <Button variant="primary" block disabled={busy || pos.pendingRewardHcow <= 0} onClick={() => setModal("claim")}>
                     Claim {fmtHcow(pos.pendingRewardHcow)}

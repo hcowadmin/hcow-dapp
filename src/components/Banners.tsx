@@ -7,7 +7,7 @@
 
 import type { ReactNode } from "react";
 import { T } from "../config/tokens";
-import { EXTERNAL_LINKS, PROTOCOL } from "../config/constants";
+import { DEDUCTION_PER_SETTLEMENT_PCT, EXTERNAL_LINKS, PROTOCOL } from "../config/constants";
 import { DEPLOYMENT } from "../config/deployment";
 import { fmtCountdown, fmtDate, fmtHcow, fmtUsdt } from "../lib/format";
 import { useCountdown } from "../hooks/useCountdown";
@@ -260,9 +260,13 @@ export function ProfitShareWarningBanner() {
           Your bonded balance can be reduced.
         </strong>
         <p style={{ margin: 0, fontSize: 13, color: T.tPri, lineHeight: 1.6 }}>
-          Bonded HCOW is consumed as the ecosystem is used. Up to {PROTOCOL.DEDUCTION_CAP_PCT}% of your bonded
-          balance can be deducted in a single {PROTOCOL.EPOCH_DAYS}-day epoch, and deductions are permanent. In an
-          epoch with no distributable profit, no deduction runs. This notice cannot be dismissed.
+          {/* The contract's limits (audit 6, H-8): 2% per settlement, and the rolling
+              30-day worst case the contract itself says to quote. Not "10% per
+              7-day epoch", which the page said before. */}
+          Bonded HCOW is consumed as the ecosystem is used. Up to {DEDUCTION_PER_SETTLEMENT_PCT}% of your bonded
+          balance can be deducted at each settlement, and at most about {PROTOCOL.DEDUCTION.ROLLING_30D_MAX_PCT}% over
+          any {PROTOCOL.DEDUCTION.WINDOW_DAYS} days. Deductions are permanent. In an epoch with no distributable
+          profit, no deduction runs. This notice cannot be dismissed.
         </p>
         <p style={{ margin: "8px 0 0" }}>
           <ExtLink href={EXTERNAL_LINKS.LEARN_BONDED_DEPOSIT}>How bonded deposits work</ExtLink>
@@ -327,9 +331,13 @@ export function PendingWithdrawalBanner({
         </span>
       </div>
       <p style={{ margin: "6px 0 0", fontSize: 12, color: T.tSec }}>
+        {/* A pending unbond can still be charged once, at the first settlement
+            after the request, and the amount shown is what it pays out now.
+            Cancelling is allowed until the withdrawal, not only during the
+            cooldown (audit 6, L-17). */}
         {lane === "profit_share"
-          ? `Cancelling returns this amount to your bonded balance. Withdrawing is a manual step after the ${PROTOCOL.UNBOND_COOLDOWN_DAYS}-day cooldown.`
-          : `Cancelling returns this amount to your delegation. Withdrawing is a manual step after the ${PROTOCOL.UNSTAKE_COOLDOWN_DAYS}-day cooldown.`}
+          ? `The amount shown is what it pays out now. It can still be charged at the first settlement after your request, and never after that. You can cancel until you withdraw, which returns it to your bonded balance. Withdrawing is a manual step after the ${PROTOCOL.UNBOND_COOLDOWN_DAYS}-day cooldown.`
+          : `You can cancel until you withdraw, which returns this amount to your delegation. Withdrawing is a manual step after the ${PROTOCOL.UNSTAKE_COOLDOWN_DAYS}-day cooldown.`}
       </p>
     </BannerShell>
   );
