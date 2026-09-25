@@ -56,6 +56,7 @@ import {
   type Hex,
   type IHcowAdapter,
   type NetworkStats,
+  type PolicyStatus,
   type PoolStats,
   type Representative,
   type StakedPosition,
@@ -504,31 +505,66 @@ async function hcowToSpend(owner: string, amount: Amount): Promise<bigint> {
 }
 
 /**
- * The deduction limits the page states are the ones a user acknowledges before
- * a first bond, and are repeated in the risk notice on every bond. Refuse,
- * before anything is sent, when the contract says otherwise (audit 6, H-8:
- * the page said 10% per 7-day epoch for a contract that caps a settlement at
- * 2%). Read once per page load; they are constants in the contract.
+ * Every policy figure the page states, read back from the contracts. The
+ * deduction limits are the ones a user acknowledges before a first bond (audit
+ * 6, H-8: the page said 10% per 7-day epoch for a contract that caps a
+ * settlement at 2%); the rest are shown on the screens and used in the
+ * waterfall. All are constants in the contracts, so one successful read per
+ * page load is enough. A failed read is not a mismatch: the cache is dropped
+ * and the error propagates as a read error.
  */
-let deductionLimitsChecked = false;
-async function assertDeductionLimits(): Promise<void> {
-  if (deductionLimitsChecked) return;
-  const [perSettlement, perWindow, windowSec] = await read(() => Promise.all([
-    reader.profitShare.MAX_DEDUCT_PPM() as Promise<bigint>,
-    reader.profitShare.MAX_DECAY_PER_WINDOW_PPM() as Promise<bigint>,
-    reader.profitShare.DECAY_WINDOW() as Promise<bigint>,
-  ]));
-  const d = PROTOCOL.DEDUCTION;
-  if (
-    Number(perSettlement) !== d.PER_SETTLEMENT_PPM ||
-    Number(perWindow) !== d.PER_WINDOW_PPM ||
-    Number(windowSec) !== d.WINDOW_DAYS * 86_400
-  ) {
-    const msg =
-      "The deduction limits on this page do not match the contract, so bonding is disabled here. Nothing was sent.";
-    throw withDetail(new AdapterError("UNKNOWN_ERROR", msg), msg);
+export const POLICY_MISMATCH_MSG =
+  "The limits on this page do not match the contract, so this action is disabled here. Nothing was sent.";
+
+let policyCache: Promise<string[]> | null = null;
+
+async function readPolicyMismatches(): Promise<string[]> {
+  if (!policyCache) {
+    const d = PROTOCOL.DEDUCTION;
+    const day = 86_400;
+    policyCache = read(() => Promise.all([
+      reader.profitShare.MAX_DEDUCT_PPM() as Promise<bigint>,
+      reader.profitShare.MAX_DECAY_PER_WINDOW_PPM() as Promise<bigint>,
+      reader.profitShare.DECAY_WINDOW() as Promise<bigint>,
+      reader.profitShare.UNBOND_COOLDOWN() as Promise<bigint>,
+      reader.profitShare.MIN_EPOCH_INTERVAL() as Promise<bigint>,
+      reader.profitShare.PARTICIPANT_BPS() as Promise<bigint>,
+      reader.profitShare.GAME_COMPANY_BPS() as Promise<bigint>,
+      reader.profitShare.TEAM_BPS() as Promise<bigint>,
+      reader.profitShare.OPEX_CAP_BPS() as Promise<bigint>,
+      reader.staking.UNSTAKE_COOLDOWN() as Promise<bigint>,
+      reader.staking.MAX_COMMISSION_BPS() as Promise<bigint>,
+    ])).then((v) => {
+      const expected: [string, number][] = [
+        ["MAX_DEDUCT_PPM", d.PER_SETTLEMENT_PPM],
+        ["MAX_DECAY_PER_WINDOW_PPM", d.PER_WINDOW_PPM],
+        ["DECAY_WINDOW", d.WINDOW_DAYS * day],
+        ["UNBOND_COOLDOWN", PROTOCOL.UNBOND_COOLDOWN_DAYS * day],
+        ["MIN_EPOCH_INTERVAL", PROTOCOL.EPOCH_DAYS * day],
+        ["PARTICIPANT_BPS", PROTOCOL.DISTRIBUTION.PARTICIPANTS_PCT * 100],
+        ["GAME_COMPANY_BPS", PROTOCOL.DISTRIBUTION.GAME_STUDIO_PCT * 100],
+        ["TEAM_BPS", PROTOCOL.DISTRIBUTION.TEAM_PCT * 100],
+        ["OPEX_CAP_BPS", PROTOCOL.OPEX_CAP_PCT * 100],
+        ["UNSTAKE_COOLDOWN", PROTOCOL.UNSTAKE_COOLDOWN_DAYS * day],
+        ["MAX_COMMISSION_BPS", PROTOCOL.COMMISSION_CAP_PCT * 100],
+      ];
+      return expected.filter(([, want], i) => v[i] !== BigInt(want)).map(([name]) => name);
+    });
+    policyCache.catch(() => { policyCache = null; });
   }
-  deductionLimitsChecked = true;
+  return policyCache;
+}
+
+/**
+ * Refuse, before anything is sent, an action that puts HCOW in (bond, top-up,
+ * stake, redelegate) when the page's figures differ from the contracts'.
+ * Actions that take HCOW or USDT out are never blocked by this.
+ */
+async function assertPolicy(): Promise<void> {
+  const mismatched = await readPolicyMismatches();
+  if (mismatched.length > 0) {
+    throw withDetail(new AdapterError("UNKNOWN_ERROR", POLICY_MISMATCH_MSG), POLICY_MISMATCH_MSG);
+  }
 }
 
 /**
@@ -1143,7 +1179,7 @@ export const chainAdapter: IHcowAdapter = {
     // (adapter v0.4.2, audit 6 L-8). indexer.ts forbids turning null into [].
     if (!indexerConfigured()) return null;
 
-    const rows = await eventsForAccount(session.address, 100);
+    const rows = await eventsForAccount(session.address, PROTOCOL.HISTORY_LIMIT);
     if (!rows) return null;
 
     const out: Transaction[] = [];
@@ -1160,11 +1196,16 @@ export const chainAdapter: IHcowAdapter = {
     return out;
   },
 
+  async getPolicyStatus(): Promise<PolicyStatus> {
+    const mismatched = await readPolicyMismatches();
+    return { matches: mismatched.length === 0, mismatched };
+  },
+
   // ---------------------------------------------------------- write: profit share
 
   async bond(amount: Amount): Promise<TxResult> {
     const signer = await requireSigner();
-    await assertDeductionLimits();
+    await assertPolicy();
     const wei = await hcowToSpend(await signer.getAddress(), amount);
     const approval = await ensureAllowance(signer, DEPLOYMENT.addresses.profitShare, wei);
 
@@ -1241,6 +1282,7 @@ export const chainAdapter: IHcowAdapter = {
   async stake(amount: Amount, representativeId: string): Promise<TxResult> {
     const signer = await requireSigner();
     const id = encodeId(representativeId);
+    await assertPolicy();
     await assertRepresentativeUsable(id);
 
     const wei = await hcowToSpend(await signer.getAddress(), amount);
@@ -1253,6 +1295,7 @@ export const chainAdapter: IHcowAdapter = {
   async redelegate(toRepresentativeId: string): Promise<TxResult> {
     const signer = await requireSigner();
     const id = encodeId(toRepresentativeId);
+    await assertPolicy();
     await assertRepresentativeUsable(id);
     const c = new Contract(DEPLOYMENT.addresses.staking, STAKING_ABI, signer);
     return submit(() => c.redelegate(id) as Promise<TransactionResponse>);

@@ -356,6 +356,10 @@ export const mockAdapter: IHcowAdapter = {
     return { ...store.burn };
   },
 
+  async getPolicyStatus() {
+    return { matches: true, mismatched: [] as string[] };
+  },
+
   async getBondedPosition() {
     requireConnected();
     return { ...store.bonded };

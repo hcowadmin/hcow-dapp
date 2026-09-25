@@ -29,8 +29,8 @@ export const PROFIT_SHARE_ABI = [
   "function GAME_COMPANY_BPS() view returns (uint16)",
   "function TEAM_BPS() view returns (uint16)",
   "function UNBOND_COOLDOWN() view returns (uint256)",
-  // Deduction limits (audit 6, H-8). bond() checks them against the copy the
-  // user acknowledges before anything is signed.
+  // Deduction limits (audit 6, H-8). With the other policy getters below, read
+  // back once per page load; entry actions refuse on a mismatch.
   "function MAX_DEDUCT_PPM() view returns (uint32)",
   "function MAX_DECAY_PER_WINDOW_PPM() view returns (uint32)",
   "function DECAY_WINDOW() view returns (uint256)",

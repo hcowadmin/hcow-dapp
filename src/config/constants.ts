@@ -13,16 +13,23 @@
 
 import { DEPLOYMENT } from "./deployment";
 
+// Each *_MS figure is derived from its *_DAYS twin, so the policy check (which
+// compares the days) also covers the countdowns (which use the ms).
+const DAY_MS = 24 * 60 * 60 * 1000;
+const EPOCH_DAYS = 7;
+const UNBOND_COOLDOWN_DAYS = 7;
+const UNSTAKE_COOLDOWN_DAYS = 7;
+
 export const PROTOCOL = {
   // ---- Epoch ----
-  EPOCH_DAYS: 7,
-  EPOCH_MS: 7 * 24 * 60 * 60 * 1000,
+  EPOCH_DAYS: EPOCH_DAYS,
+  EPOCH_MS: EPOCH_DAYS * DAY_MS,
 
   // ---- Profit Share (Bonded Deposit) ----
   /**
    * The deduction limits as HCOWProfitShare enforces them. These are the
    * numbers the risk notice states and the first-bond acknowledgement asks a
-   * user to accept, so bond() checks the three contract values against them
+   * user to accept. The adapter reads them, and the other policy figures below, back from the contracts
    * before anything is signed and refuses on a mismatch (audit 6, H-8). They
    * used to read "10% per 7-day epoch"; the contract caps a settlement at 2%.
    */
@@ -38,16 +45,16 @@ export const PROTOCOL = {
      * derives it from the three values above (two fixed windows can be packed
      * back to back: 59,999 ppm summed). The contract asks for this figure to be
      * quoted rather than the per-window 3%. Valid only while the three values
-     * above match the contract, which bond() enforces.
+     * above match the contract, which the adapter checks before any entry action.
      */
     ROLLING_30D_MAX_PCT: "5.87",
   },
-  UNBOND_COOLDOWN_DAYS: 7,
-  UNBOND_COOLDOWN_MS: 7 * 24 * 60 * 60 * 1000,
+  UNBOND_COOLDOWN_DAYS: UNBOND_COOLDOWN_DAYS,
+  UNBOND_COOLDOWN_MS: UNBOND_COOLDOWN_DAYS * DAY_MS,
 
   // ---- Network Staking (delegation and commission, not consensus) ----
-  UNSTAKE_COOLDOWN_DAYS: 7,
-  UNSTAKE_COOLDOWN_MS: 7 * 24 * 60 * 60 * 1000,
+  UNSTAKE_COOLDOWN_DAYS: UNSTAKE_COOLDOWN_DAYS,
+  UNSTAKE_COOLDOWN_MS: UNSTAKE_COOLDOWN_DAYS * DAY_MS,
   /** Contract-level ceiling on representative commission. */
   COMMISSION_CAP_PCT: 10,
 
@@ -60,6 +67,12 @@ export const PROTOCOL = {
 
   /** Deductible operating cost ceiling, as a share of net revenue. */
   OPEX_CAP_PCT: 40,
+
+  /**
+   * Transaction history reads this many of the account's latest events from
+   * the index. The Portfolio screen says so and points to BscScan for the rest.
+   */
+  HISTORY_LIMIT: 100,
 
   // ---- Token ----
   TOKEN_TOTAL_SUPPLY: 200_000_000,

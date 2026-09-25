@@ -99,6 +99,14 @@
  *     those numbers are what the first-bond acknowledgement asks a user to
  *     accept.
  *
+ * 20. v0.4.7 (audit 6, policy getters): getPolicyStatus() added. The page's
+ *     policy figures (deduction limits, both cooldowns, the minimum epoch
+ *     interval, the 50/25/25 split, the opex cap, the commission cap) are read
+ *     back from the contracts. On a mismatch bond, topUpBond, stake and
+ *     redelegate refuse before anything is sent; withdrawals, cancels and
+ *     claims are never blocked by it. getTxHistory returns at most
+ *     PROTOCOL.HISTORY_LIMIT rows.
+ *
  * ---------------------------------------------------------------------------
  * DISTRIBUTION POLICY  v0.4   (read before implementing any money field)
  * ---------------------------------------------------------------------------
@@ -595,6 +603,16 @@ export interface FaucetStatus {
   windowResetsAt: Timestamp | null;
 }
 
+/**
+ * v0.4.7. Whether the policy figures the page states match the contracts.
+ * `mismatched` names the contract constants that differ. A failed read throws
+ * rather than reporting a mismatch.
+ */
+export interface PolicyStatus {
+  matches: boolean;
+  mismatched: string[];
+}
+
 export interface IHcowAdapter {
   // ---- WALLET ----
   getWalletState(): Promise<WalletState>;
@@ -616,6 +634,8 @@ export interface IHcowAdapter {
   getPoolStats(): Promise<PoolStats>;
   getNetworkStats(): Promise<NetworkStats>;
   getBurnStats(): Promise<BurnStats>;
+  /** v0.4.7. Read once per page load; throws on a failed read. */
+  getPolicyStatus(): Promise<PolicyStatus>;
   /** Uses the currently connected account. Throws WALLET_NOT_CONNECTED if none. */
   getBondedPosition(): Promise<BondedPosition>;
   getStakedPosition(): Promise<StakedPosition>;

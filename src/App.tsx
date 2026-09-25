@@ -16,7 +16,7 @@ import { HCOW_MARK } from "./config/brand";
 import { presentError } from "./lib/errors";
 import { fmtAmount, shortHash } from "./lib/format";
 import { useWallet } from "./hooks/useWallet";
-import { FaucetBanner, LowGasBanner, TestnetStrip, WrongNetworkBanner } from "./components/Banners";
+import { FaucetBanner, LowGasBanner, PolicyMismatchBanner, TestnetStrip, WrongNetworkBanner } from "./components/Banners";
 import { ToastHost } from "./components/Toast";
 import type { ToastInput, ToastItem } from "./components/Toast";
 import type { FaucetStatus } from "./data";
@@ -73,6 +73,20 @@ export default function App() {
      data refetches on account or chain change, and never on a timer. */
   const walletKey = `${wallet.address ?? "none"}:${wallet.chainId ?? "none"}`;
   const canRead = wallet.connected && !wrongNetwork;
+
+  /* Policy figures read back from the contracts once per page load. A read
+     failure shows nothing here; the write paths re-check and refuse. */
+  const [policyMismatch, setPolicyMismatch] = useState(false);
+  useEffect(() => {
+    let live = true;
+    adapter.getPolicyStatus().then(
+      (p) => { if (live) setPolicyMismatch(!p.matches); },
+      () => { if (live) setPolicyMismatch(false); },
+    );
+    return () => { live = false; };
+    // Re-checked on account or chain change: a read that failed at page load
+    // gets another chance. A successful read is cached, so this costs nothing.
+  }, [walletKey]);
 
   useEffect(() => {
     const f = adapter.faucet;
@@ -236,8 +250,9 @@ export default function App() {
       </header>
 
       {/* ---------------- global banners ---------------- */}
-      {wrongNetwork || lowGas || faucet ? (
+      {wrongNetwork || lowGas || faucet || policyMismatch ? (
         <div style={{ maxWidth: MAX_WIDTH, margin: "0 auto", padding: "16px 24px 0", display: "grid", gap: 10 }}>
+          {policyMismatch ? <PolicyMismatchBanner /> : null}
           {wrongNetwork ? <WrongNetworkBanner /> : null}
           {lowGas ? <LowGasBanner bnb={wallet.balances.bnb} /> : null}
           {faucet ? (

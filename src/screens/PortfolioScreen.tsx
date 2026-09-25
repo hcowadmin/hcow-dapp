@@ -13,7 +13,7 @@ import { useState } from "react";
 import { adapter } from "../data";
 import type { BondedPosition, StakedPosition, Transaction, TxFilter, TxStatus, TxType, WalletState } from "../data";
 import { T } from "../config/tokens";
-import { PROTOCOL, txUrl } from "../config/constants";
+import { PROTOCOL, addressUrl, txUrl } from "../config/constants";
 import { fmtAmount, fmtDate, fmtHcow, fmtRatioPct, fmtUsdt, shortHash } from "../lib/format";
 import { useAsync } from "../hooks/useAsync";
 import { useErrorToast } from "../components/Toast";
@@ -137,7 +137,7 @@ export function PortfolioScreen({
         <SectionLabel right="Not connected">Portfolio</SectionLabel>
         <EmptyState
           title="Connect a wallet to view your portfolio"
-          body="Your balances, positions across both lanes, lifetime totals and full on-chain history appear here once a wallet is connected."
+          body="Your balances, positions across both lanes, lifetime totals and recent on-chain history appear here once a wallet is connected."
           action={
             <Button variant="primary" onClick={onConnect}>
               Connect wallet
@@ -335,6 +335,13 @@ export function PortfolioScreen({
                 {rows.map((tx) => (
                   <TxRow key={tx.hash} tx={tx} />
                 ))}
+                <p style={{ margin: "8px 0 0", fontSize: 12, color: T.tSec }}>
+                  Listed from your latest {PROTOCOL.HISTORY_LIMIT} on-chain actions. The full record is on{" "}
+                  <a href={addressUrl(wallet.address)} target="_blank" rel="noreferrer noopener" style={{ color: "inherit" }}>
+                    BscScan
+                  </a>
+                  .
+                </p>
               </div>
             )}
           </Card>

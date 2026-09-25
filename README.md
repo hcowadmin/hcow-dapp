@@ -22,15 +22,17 @@ Node 18 or newer.
 `src/data/chain.ts` is written and `src/data/index.ts` is already flipped to
 `chainAdapter`. The app reads and writes the contracts listed in
 `src/config/deployment.ts`, which default to the BSC testnet deployment of
-2026-08-13. The HCOW and USDT entries there are stand-in test tokens with no
+2026-09-02. The HCOW and USDT entries there are stand-in test tokens with no
 value; the real HCOW token does not exist yet.
 
-Point the same bundle at another network with Vite env vars, no code change:
+The app supports BNB Smart Chain only: testnet (97) and, once deployed,
+mainnet (56). Build-time Vite env vars select the deployment:
 
 ```
 VITE_CHAIN_ID  VITE_CHAIN_NAME  VITE_RPC_URL  VITE_EXPLORER_BASE
 VITE_HCOW_ADDRESS  VITE_USDT_ADDRESS
 VITE_PROFIT_SHARE_ADDRESS  VITE_STAKING_ADDRESS  VITE_LEDGER_ADDRESS
+VITE_FAUCET_ADDRESS   (testnet only; "off" disables it; ignored on any other chain)
 ```
 
 Chain identity now lives in `deployment.ts`; `constants.ts` re-exports it so
@@ -60,9 +62,11 @@ the list to work through, in this order:
 Transaction history and the settlement transaction hash come from the event
 index. Set
 `VITE_INDEXER_URL` and `VITE_INDEXER_KEY` to the Supabase project URL and its
-anon key. Leave them empty and the app still works: transaction history then
-reports null, shown as "History unavailable", and the settlement transaction
-link is left out. The gross-received, paid-to-participants and deducted-at-settlement
+anon key. An empty value does not switch the index off (an empty env var reads
+as unset and the built-in default is used). If the index cannot be read the app
+still works: transaction history reports null, shown as "History unavailable",
+and the settlement transaction link is left out. History lists actions from the
+account's latest `PROTOCOL.HISTORY_LIMIT` (100) indexed events. The gross-received, paid-to-participants and deducted-at-settlement
 windows do not use the index: they are summed from the contract's own
 settlement records. The burned total is the balance of the contract's
 `BURN_ADDRESS` (deductions and unbond forfeits are sent there, which does not
@@ -71,10 +75,12 @@ holders burned themselves with `burn()`. There is no transaction-fee burn (see
 `HCOWToken.sol`).
 
 The deduction limits the app states (2% per settlement, about 5.87% over any 30
-days) are in `PROTOCOL.DEDUCTION`. `bond()` compares them with the contract's
-`MAX_DEDUCT_PPM`, `MAX_DECAY_PER_WINDOW_PPM` and `DECAY_WINDOW` before anything
-is signed and refuses on a mismatch, because they are the numbers the first-bond
-acknowledgement asks a user to accept.
+days) are in `PROTOCOL.DEDUCTION`, next to the other policy figures the screens
+show: both cooldowns, the minimum epoch interval, the 50/25/25 split, the opex
+cap and the commission cap. The adapter reads all eleven back from the
+contracts once per page load. On a mismatch a banner says the page is out of
+date, and `bond()`, `topUpBond()`, `stake()` and `redelegate()` refuse before
+anything is signed. Withdrawals, cancels and claims are never blocked by it.
 
 The contract side is closed. `participantCount` and `lifetimeOf(account)` were
 added to `HCOWProfitShare` for exactly these fields, so participant count,

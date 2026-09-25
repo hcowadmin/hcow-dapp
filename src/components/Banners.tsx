@@ -201,6 +201,20 @@ export function WrongNetworkBanner() {
 }
 
 /* ============================================================
+   POLICY MISMATCH  (audit 6, policy getters)
+   Shown only when a figure on the page differs from the contracts.
+   ============================================================ */
+
+export function PolicyMismatchBanner() {
+  return (
+    <BannerShell tone="warn" icon="!" title="Page out of date" role="alert">
+      Some limits on this page do not match the contracts on {PROTOCOL.CHAIN_NAME}. New bonding and staking are
+      disabled here until this page is updated. Withdrawals and claims still work.
+    </BannerShell>
+  );
+}
+
+/* ============================================================
    LOW GAS
    ============================================================ */
 
