@@ -1,5 +1,13 @@
-node_modules
-dist
-dist-node
-.DS_Store
-tsconfig.tsbuildinfo
+   node_modules
+   dist
+   dist-node
+   .DS_Store
+   tsconfig.tsbuildinfo
+
+   # Environment files: never commit (audit 6, L-10)
+   .env
+   .env.*
+   !.env.example
+
+   # Build folders made for Netlify drag-and-drop
+   hcow-dapp-deploy-*
