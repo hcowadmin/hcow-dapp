@@ -56,12 +56,32 @@ export interface ChainEventRow {
   account: string | null;
   epoch: number | null;
   args: Record<string, string>;
+  /** Present on every row the table returns; optional so a caller can tell "absent" from "other". */
+  contract?: string;
+  chain_id?: number;
 }
 
-/** Most recent first. `limit` is a hard cap, not a page size: there is no UI for paging yet. */
+/**
+ * The contracts whose events belong in this deployment's history, lower case.
+ * The table is shared: chain 97 also holds the retired August deployment, and
+ * a mainnet build pointed at the same index would otherwise list testnet rows
+ * as its own (2026-09-26, observed on a live wallet).
+ */
+export const accountEventContracts = (): string[] =>
+  [DEPLOYMENT.addresses.profitShare, DEPLOYMENT.addresses.staking, DEPLOYMENT.addresses.ledger]
+    .filter((a) => a.length > 0)
+    .map((a) => a.toLowerCase());
+
+/**
+ * Most recent first. `limit` is a hard cap, not a page size: there is no UI for paging yet.
+ * Filtered to this chain and these contracts on the server, so rows from another
+ * deployment cannot use up the cap. ilike without wildcards is a case-insensitive equality.
+ */
 export const eventsForAccount = (address: string, limit = 100) =>
   query<ChainEventRow>(
     `chain_events?account=eq.${address.toLowerCase()}` +
+      `&chain_id=eq.${DEPLOYMENT.chainId}` +
+      `&or=(${accountEventContracts().map((a) => `contract.ilike.${a}`).join(",")})` +
       `&order=block_number.desc,log_index.desc&limit=${limit}`
   );
 

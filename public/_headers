@@ -1,0 +1,20 @@
+# Netlify response headers (audit 6, L-10 follow-up). Copied into dist/ by the build.
+#
+# REPORT-ONLY. Nothing is blocked: a browser that sees a violation only writes
+# "[Report Only]" to its console. Switch the header name to
+# Content-Security-Policy only after a clean week with a wallet connected.
+#
+# Every origin below is one this build actually contacts:
+#   fonts.googleapis.com / fonts.gstatic.com   index.html font stylesheet and files
+#   data-seed-prebsc-1-s1.bnbchain.org:8545    VITE_RPC_URL default (BSC testnet). The port
+#                                              must be written out: a host without one only
+#                                              matches 443
+#   nkmsgvgwleyaognxqfnb.supabase.co           VITE_INDEXER_URL default (event index, anon key)
+# The wallet is window.ethereum, injected by the extension: the page itself
+# makes no wallet network request.
+#
+# CHANGE THIS FILE WHEN VITE_RPC_URL OR VITE_INDEXER_URL CHANGES (mainnet build).
+# A mainnet build that keeps this list reports every RPC read as a violation,
+# and once enforced, blocks them.
+/*
+  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://data-seed-prebsc-1-s1.bnbchain.org:8545 https://nkmsgvgwleyaognxqfnb.supabase.co; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'

@@ -72,6 +72,7 @@ import {
 
 import { ERC20_ABI, FAUCET_ABI, LEDGER_ABI, PROFIT_SHARE_ABI, STAKING_ABI } from "./abi";
 import {
+  accountEventContracts,
   eventsForAccount,
   indexerConfigured,
   settlementForEpoch,
@@ -1183,8 +1184,14 @@ export const chainAdapter: IHcowAdapter = {
     if (!rows) return null;
 
     const out: Transaction[] = [];
+    const ours = new Set(accountEventContracts());
     for (const row of rows) {
       if (!row || typeof row !== "object") continue;   // the index is untrusted (M-2)
+      // The query already filters by chain and contract. Checked again here
+      // because the index is untrusted: a row that says it is from another
+      // chain or contract is never shown as this deployment's history.
+      if (row.chain_id !== undefined && row.chain_id !== DEPLOYMENT.chainId) continue;
+      if (row.contract !== undefined && (typeof row.contract !== "string" || !ours.has(row.contract.toLowerCase()))) continue;
       // Own keys only: row.event "constructor" or "toString" found a function
       // on the object's prototype and passed it on as a TxType (audit 6, M-2).
       const type = Object.prototype.hasOwnProperty.call(EVENT_TO_TX, row.event) ? EVENT_TO_TX[row.event] : undefined;
